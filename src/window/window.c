@@ -2,6 +2,7 @@
 #include "../safe_cast.h"
 
 #include <assert.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <xcb/xcb.h>
@@ -109,6 +110,83 @@ void mcc_window_close(struct mcc_window *w) {
     xcb_unmap_window(w->connection, w->window_id);
     xcb_flush(w->connection);
     w->mapped = false;
+}
+
+union mcc_window_event mcc_window_translate_event(struct mcc_window *w, xcb_generic_event_t *event) {
+    switch (event->response_type & ~0x80)
+    {
+    case XCB_CLIENT_MESSAGE: {
+        auto client_message = (xcb_client_message_event_t*)event;
+        if (client_message->format == 32
+            && client_message->type == intern_helper(w->connection, "WM_PROTOCOLS")
+            && client_message->data.data32[0] == intern_helper(w->connection, "WM_DELETE_WINDOW")) {
+
+            return (union mcc_window_event) {
+                .delete_window = {
+                    .kind = MCC_WINDOW_EVENT_DELETE_WINDOW,
+                },
+            };
+        }
+        break;
+    }
+    case XCB_KEY_PRESS: {
+        return (union mcc_window_event) {
+            .expose = {
+                .kind = MCC_WINDOW_EVENT_KEY_PRESS,
+            },
+        };
+    }
+    case XCB_KEY_RELEASE: {
+        return (union mcc_window_event) {
+            .expose = {
+                .kind = MCC_WINDOW_EVENT_KEY_RELEASE,
+            },
+        };
+    }
+    case XCB_MOTION_NOTIFY: {
+        return (union mcc_window_event) {
+            .expose = {
+                .kind = MCC_WINDOW_EVENT_MOUSE_MOVE,
+            },
+        };
+    }
+    case XCB_BUTTON_PRESS: {
+        return (union mcc_window_event) {
+            .expose = {
+                .kind = MCC_WINDOW_EVENT_BUTTON_PRESS,
+            },
+        };
+    }
+    case XCB_BUTTON_RELEASE: {
+        return (union mcc_window_event) {
+            .expose = {
+                .kind = MCC_WINDOW_EVENT_BUTTON_RELEASE,
+            },
+        };
+    }
+    case XCB_EXPOSE: {
+        return (union mcc_window_event) {
+            .expose = {
+                .kind = MCC_WINDOW_EVENT_EXPOSE,
+            },
+        };
+    }
+    default:
+        printf("Unknown XCB event: %u\n", event->response_type & ~0x80);
+    }
+
+    return (union mcc_window_event) {
+        .kind = MCC_WINDOW_EVENT_UNKNOWN,
+    };
+}
+
+union mcc_window_event mcc_window_wait_next_event(struct mcc_window *w) {
+    for(;;) {
+        auto xcb_event = xcb_wait_for_event(w->connection);
+        union mcc_window_event mcc_event = mcc_window_translate_event(w, xcb_event);
+        if (mcc_event.kind != MCC_WINDOW_EVENT_UNKNOWN)
+            return mcc_event;
+    }
 }
 
 void mcc_window_free(struct mcc_window *w) {
