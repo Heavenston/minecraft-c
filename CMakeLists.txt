@@ -15,3 +15,15 @@ find_library(XCB_FIXES NAMES xcb-xfixes libxcb-xfixes REQUIRED)
 target_link_libraries(${PROJECT_NAME} PRIVATE ${XCB})
 target_link_libraries(${PROJECT_NAME} PRIVATE ${XCB_ICCCM})
 target_link_libraries(${PROJECT_NAME} PRIVATE ${XCB_FIXES})
+
+if (CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(${PROJECT_NAME} PRIVATE
+        -Wall
+        -Wextra
+        -Wpedantic
+        -Wconversion
+        -Wsign-conversion
+    )
+elseif (CMAKE_C_COMPILER_ID STREQUAL "MSVC")
+    target_compile_options(${PROJECT_NAME} PRIVATE /W4)
+endif()
