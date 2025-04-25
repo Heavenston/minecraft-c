@@ -63,11 +63,25 @@ union mcc_window_event {
     struct mcc_window_event_expose expose;
 };
 
+struct mcc_window_geometry {
+    int16_t x;
+    int16_t y;
+    uint16_t width;
+    uint16_t height;
+};
+
 struct mcc_window *mcc_window_create(struct mcc_create_window_cfg);
+
+struct mcc_window_geometry mcc_window_get_geometry(struct mcc_window *);
 
 void mcc_window_open(struct mcc_window *);
 void mcc_window_close(struct mcc_window *);
 
 union mcc_window_event mcc_window_wait_next_event(struct mcc_window *w);
+
+/**
+ * Puts an image on the window (format should be BGRA and the alpha component is ignored)
+ */
+void mcc_window_put_image(struct mcc_window *, uint8_t *data, uint16_t width, uint16_t height);
 
 void mcc_window_free(struct mcc_window *);

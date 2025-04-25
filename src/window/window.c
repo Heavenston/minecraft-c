@@ -28,12 +28,12 @@ struct mcc_window {
     xcb_connection_t* connection;
     xcb_screen_t* screen;
     xcb_window_t window_id;
+    xcb_gcontext_t gc;
 
     bool mapped;
 };
 
-xcb_atom_t intern_helper(xcb_connection_t* connection, const char* name)
-{
+xcb_atom_t intern_helper(xcb_connection_t* connection, const char* name) {
     auto cookie = xcb_intern_atom(connection, 0, safe_to_u16(strlen(name)), name);
     auto reply = xcb_intern_atom_reply(connection, cookie, nullptr);
     xcb_atom_t atom = reply->atom;
@@ -42,8 +42,6 @@ xcb_atom_t intern_helper(xcb_connection_t* connection, const char* name)
 }
 
 struct mcc_window *mcc_window_create(struct mcc_create_window_cfg cfg) {
-    struct mcc_window *w = malloc(sizeof(*w));
-
     xcb_connection_t *connection = xcb_connect(NULL, NULL);
 
     const xcb_setup_t* setup = xcb_get_setup(connection);
@@ -54,8 +52,22 @@ struct mcc_window *mcc_window_create(struct mcc_create_window_cfg cfg) {
     {
         window_id = xcb_generate_id(connection);
 
-        uint32_t mask = XCB_CW_EVENT_MASK;
-        uint32_t value_list[] = { event_mask };
+        /** Wether to enable automatic clearing of the window */
+        const bool enable_clear = false;
+
+        uint32_t mask;
+        uint32_t value_list[2];
+
+        if (enable_clear) {
+            mask = XCB_CW_EVENT_MASK | XCB_CW_BACK_PIXEL;
+            value_list[0] = screen->black_pixel;
+            value_list[1] = event_mask;
+        }
+        else {
+            mask = XCB_CW_EVENT_MASK;
+            value_list[0] = event_mask;
+        }
+
         xcb_create_window(connection,                    /* connection */
                           XCB_COPY_FROM_PARENT,          /* depth */
                           window_id,                     /* window id           */
@@ -87,20 +99,62 @@ struct mcc_window *mcc_window_create(struct mcc_create_window_cfg cfg) {
             sizeof(protocols) / sizeof(*protocols), protocols);
     }
 
+    xcb_gcontext_t gc = xcb_generate_id(connection);
+    uint32_t gc_vals[] = { screen->black_pixel, 0 };
+    auto gc_cookie = xcb_create_gc_checked(
+        connection,
+        gc,
+        window_id,
+        XCB_GC_FOREGROUND | XCB_GC_GRAPHICS_EXPOSURES,
+        gc_vals
+    );
+    xcb_flush(connection);
+    auto error = xcb_request_check(connection, gc_cookie);
+    if (error) {
+        printf("Could not put image: %d\n", error->error_code);
+        free(error);
+    }
+    
+    struct mcc_window *w = malloc(sizeof(*w));
     *w = (struct mcc_window){
         .connection = connection,
         .screen = screen,
         .window_id = window_id,
+        .gc = gc,
 
         .mapped = false,
     };
-
     return w;
+}
+
+struct mcc_window_geometry mcc_window_get_geometry(struct mcc_window *w) {
+    xcb_get_geometry_cookie_t cookie = xcb_get_geometry(w->connection, w->window_id);
+    xcb_get_geometry_reply_t *reply = xcb_get_geometry_reply(w->connection, cookie, NULL);
+
+    if (!reply) {
+        assert("Failed to get window geometry.\n" == NULL);
+    }
+
+    struct mcc_window_geometry geometry = {
+        .x = reply->x,
+        .y = reply->y,
+        .height = reply->height,
+        .width = reply->width,
+    };
+
+    free(reply);
+
+    return geometry;
 }
 
 void mcc_window_open(struct mcc_window *w) {
     assert(!w->mapped);
     xcb_map_window(w->connection, w->window_id);
+    xcb_clear_area(w->connection,
+                   0,               /* exposures */
+                   w->window_id,
+                   0, 0,            /* x, y */
+                   0, 0);           /* width, height: 0 means entire window */
     xcb_flush(w->connection);
     w->mapped = true;
 }
@@ -186,6 +240,31 @@ union mcc_window_event mcc_window_wait_next_event(struct mcc_window *w) {
         union mcc_window_event mcc_event = mcc_window_translate_event(w, xcb_event);
         if (mcc_event.kind != MCC_WINDOW_EVENT_UNKNOWN)
             return mcc_event;
+    }
+}
+
+void mcc_window_put_image(struct mcc_window *w, uint8_t *data, uint16_t width, uint16_t height) {
+    const uint8_t format = XCB_IMAGE_FORMAT_Z_PIXMAP;
+    const uint8_t depth  = 24;
+    uint32_t data_len    = safe_to_u32(width) * safe_to_u32(height) * 4;
+
+    auto cookie = xcb_put_image_checked(
+        w->connection,
+        format,
+        w->window_id,
+        w->gc,
+        width, height,
+        0, 0,
+        0,
+        depth,
+        data_len,
+        data
+    );
+    xcb_flush(w->connection);
+    auto error = xcb_request_check(w->connection, cookie);
+    if (error) {
+        printf("Could not put image: %d (%d.%d)\n", error->error_code, error->major_code, error->minor_code);
+        free(error);
     }
 }
 

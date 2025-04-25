@@ -1,6 +1,8 @@
+#include "safe_cast.h"
 #include "window/window.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 
 int main() {
     struct mcc_window *window = mcc_window_create((struct mcc_create_window_cfg){
@@ -32,6 +34,15 @@ int main() {
         case MCC_WINDOW_EVENT_BUTTON_RELEASE:
             break;
         case MCC_WINDOW_EVENT_EXPOSE:
+            auto geometry = mcc_window_get_geometry(window);
+            size_t height = safe_to_size_t(geometry.height);
+            size_t width  = safe_to_size_t(geometry.width);
+            size_t bytes  = height * width * 4;
+            uint8_t *data = calloc(1, bytes);
+
+            mcc_window_put_image(window, data, geometry.width, geometry.height);
+
+            free(data);
             break;
         }
     }
