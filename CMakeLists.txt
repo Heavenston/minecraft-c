@@ -25,3 +25,6 @@ find_library(XCB_FIXES NAMES xcb-xfixes libxcb-xfixes REQUIRED)
 target_link_libraries(${PROJECT_NAME} PRIVATE ${XCB})
 target_link_libraries(${PROJECT_NAME} PRIVATE ${XCB_ICCCM})
 target_link_libraries(${PROJECT_NAME} PRIVATE ${XCB_FIXES})
+
+# Link against the math library
+target_link_libraries(${PROJECT_NAME} PRIVATE m)
