@@ -1,5 +1,5 @@
 #include "window.h"
-#include "../safe_cast.h"
+#include "safe_cast.h"
 
 #include <assert.h>
 #include <stdio.h>
