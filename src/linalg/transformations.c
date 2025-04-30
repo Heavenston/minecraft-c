@@ -47,6 +47,53 @@ mcc_mat4f mcc_mat4f_translate_z(float delta) {
     return mat;
 }
 
+mcc_mat4f mcc_mat4f_scale_x(float factor) {
+    mcc_mat4f mat = mcc_mat4f_identity();
+    mat.comps[0][0] = factor;
+    return mat;
+}
+
+mcc_mat4f mcc_mat4f_scale_y(float factor) {
+    mcc_mat4f mat = mcc_mat4f_identity();
+    mat.comps[1][1] = factor;
+    return mat;
+}
+
+mcc_mat4f mcc_mat4f_scale_z(float factor) {
+    mcc_mat4f mat = mcc_mat4f_identity();
+    mat.comps[2][2] = factor;
+    return mat;
+}
+
+mcc_mat4f mcc_mat4f_scale_xy(float factor_x, float factor_y) {
+    mcc_mat4f mat = mcc_mat4f_identity();
+    mat.comps[0][0] = factor_x;
+    mat.comps[1][1] = factor_y;
+    return mat;
+}
+
+mcc_mat4f mcc_mat4f_scale_xz(float factor_x, float factor_z) {
+    mcc_mat4f mat = mcc_mat4f_identity();
+    mat.comps[0][0] = factor_x;
+    mat.comps[2][2] = factor_z;
+    return mat;
+}
+
+mcc_mat4f mcc_mat4f_scale_yz(float factor_y, float factor_z) {
+    mcc_mat4f mat = mcc_mat4f_identity();
+    mat.comps[1][1] = factor_y;
+    mat.comps[2][2] = factor_z;
+    return mat;
+}
+
+mcc_mat4f mcc_mat4f_scale_xyz(float factor_x, float factor_y, float factor_z) {
+    mcc_mat4f mat = mcc_mat4f_identity();
+    mat.comps[0][0] = factor_x;
+    mat.comps[1][1] = factor_y;
+    mat.comps[2][2] = factor_z;
+    return mat;
+}
+
 mcc_mat4f mcc_mat4f_perspective(float ar, float z_near, float z_far, float alpha) {
     float tan_half_alpha = tanf(alpha / 2.0f);
     float z_range = z_far - z_near;

@@ -14,4 +14,18 @@ mcc_mat4f mcc_mat4f_translate_y(float theta);
 
 mcc_mat4f mcc_mat4f_translate_z(float theta);
 
+mcc_mat4f mcc_mat4f_scale_x(float factor);
+
+mcc_mat4f mcc_mat4f_scale_y(float factor);
+
+mcc_mat4f mcc_mat4f_scale_z(float factor);
+
+mcc_mat4f mcc_mat4f_scale_xy(float factor_x, float factor_y);
+
+mcc_mat4f mcc_mat4f_scale_xz(float factor_x, float factor_z);
+
+mcc_mat4f mcc_mat4f_scale_yz(float factor_y, float factor_z);
+
+mcc_mat4f mcc_mat4f_scale_xyz(float factor_x, float factor_y, float factor_z);
+
 mcc_mat4f mcc_mat4f_perspective(float ar, float z_near, float z_far, float alpha);
