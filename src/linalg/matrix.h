@@ -143,7 +143,7 @@ static inline mcc_mat4f mcc_mat4f_mul(mcc_mat4f a, mcc_mat4f b) {
     for (int i = 0; i < 4; i++) {
         for (int j = 0; j < 4; j++) {
             for (int k = 0; k < 4; k++) {
-                result.comps[i][j] += a.comps[i][k] * b.comps[k][j];
+                result.comps[j][i] += a.comps[k][i] * b.comps[j][k];
             }
         }
     }
@@ -199,10 +199,13 @@ static inline mcc_vec3f mcc_mat3f_mul_vec3f(mcc_mat3f mat, mcc_vec3f vec) {
 }
 
 static inline mcc_vec4f mcc_mat4f_mul_vec4f(mcc_mat4f mat, mcc_vec4f vec) {
-    return (mcc_vec4f){
-        .x = mat.r1.x * vec.x + mat.r1.y * vec.y + mat.r1.z * vec.z + mat.r1.w * vec.w,
-        .y = mat.r2.x * vec.x + mat.r2.y * vec.y + mat.r2.z * vec.z + mat.r2.w * vec.w,
-        .z = mat.r3.x * vec.x + mat.r3.y * vec.y + mat.r3.z * vec.z + mat.r3.w * vec.w,
-        .w = mat.r4.x * vec.x + mat.r4.y * vec.y + mat.r4.z * vec.z + mat.r4.w * vec.w,
-    };
+    mcc_vec4f out;
+    for (int i = 0; i < 4; ++i) {
+        out.components[i] =
+              mat.comps[0][i] * vec.components[0]
+            + mat.comps[1][i] * vec.components[1]
+            + mat.comps[2][i] * vec.components[2]
+            + mat.comps[3][i] * vec.components[3];
+    }
+    return out;
 }
