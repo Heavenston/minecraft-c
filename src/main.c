@@ -33,6 +33,11 @@ void my_vertex_shader_fn(struct mcc_cpurast_vertex_shader_input *input) {
 
     mcc_vec4f pos4 = (mcc_vec4f){{ pos3.x, pos3.y, pos3.z, 1.f }};
     input->out_position = mcc_mat4f_mul_vec4f(data->mvp, pos4);
+
+    mcc_vec4f out4 = input->out_position;
+    mcc_vec3f out3 = mcc_vec3f_scale(out4.xyz, 1.f / out4.w);
+
+    printf("%f, %f, %f\t(%f, %f, %f / %f)\n", out3.x, out3.y, out3.z, out4.x, out4.y, out4.z, out4.w);
     
     // input->out_position = (mcc_vec4f){{ pos3.x, pos3.y, pos3.z, 1.f }};
     input->r_out_varyings[0].vec4f = (mcc_vec4f){{ uv.x, uv.y, 0.f, 1.f }};
@@ -144,13 +149,18 @@ int main() {
         .o_fragment_shader_data = &shader_data,
         .r_fragment_shader = &fragment_shader,
 
-        .culling_mode = MCC_CPURAST_CULLING_MODE_NONE,
-        .o_depth_comparison_fn = mcc_depth_comparison_fn_gt,
+        .culling_mode = MCC_CPURAST_CULLING_MODE_CCW,
+        .o_depth_comparison_fn = mcc_depth_comparison_fn_lt,
 
         .vertex_count = shader_data.vertex_count,
         .vertex_processing = MCC_CPURAST_VERTEX_PROCESSING_TRIANGLE_LIST,
     };
-    
+
+    struct mcc_cpurast_clear_config clear_config = {
+        .clear_depth = 1.,
+        .clear_color = { 0., 0., 0., 1. },
+    };
+
     float rotation_angle = 0.0f;
     const float rotation_delta = 0.1f; // Amount to rotate per key press
 
@@ -199,7 +209,7 @@ int main() {
              */
             mcc_mat4f model = mcc_mat4f_rotate_y(rotation_angle);
             // Position the camera at {0,0,-3} (so move all object to {0,0,3})
-            mcc_mat4f view = mcc_mat4f_translate_z(-3.f);
+            mcc_mat4f view = mcc_mat4f_translate_z(3.f);
             mcc_mat4f projection = mcc_mat4f_perspective(
                 (float)width / (float)height,
                 0.001f, 100.f,
@@ -220,7 +230,9 @@ int main() {
                 .height = height,
             };
             render_config.r_attachment = &attachment;
+            clear_config.r_attachment = &attachment;
 
+            mcc_cpurast_clear(&clear_config);
             mcc_cpurast_render(&render_config);
 
             mcc_window_put_image(window, image_data, geometry.width, geometry.height);
