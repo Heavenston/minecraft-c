@@ -36,8 +36,6 @@ void my_vertex_shader_fn(struct mcc_cpurast_vertex_shader_input *input) {
 
     mcc_vec4f out4 = input->out_position;
     mcc_vec3f out3 = mcc_vec3f_scale(out4.xyz, 1.f / out4.w);
-
-    printf("%f, %f, %f\t(%f, %f, %f / %f)\n", out3.x, out3.y, out3.z, out4.x, out4.y, out4.z, out4.w);
     
     // input->out_position = (mcc_vec4f){{ pos3.x, pos3.y, pos3.z, 1.f }};
     input->r_out_varyings[0].vec4f = (mcc_vec4f){{ uv.x, uv.y, 0.f, 1.f }};
