@@ -96,6 +96,7 @@ int main() {
             close = true;
             break;
         case MCC_WINDOW_EVENT_KEY_PRESS:
+            printf("Key pressed: %u\n", event.key_press.keycode);
             break;
         case MCC_WINDOW_EVENT_KEY_RELEASE:
             break;
