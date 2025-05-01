@@ -28,4 +28,4 @@ mcc_mat4f mcc_mat4f_scale_yz(float factor_y, float factor_z);
 
 mcc_mat4f mcc_mat4f_scale_xyz(float factor_x, float factor_y, float factor_z);
 
-mcc_mat4f mcc_mat4f_perspective(float ar, float z_near, float z_far, float alpha);
+mcc_mat4f mcc_mat4f_perspective(float aspect_ratio, float z_near, float z_far, float fov_rad);
