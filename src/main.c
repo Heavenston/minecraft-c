@@ -4,6 +4,9 @@
 #include "cpu_rasterizer/cpu_rasterizer.h"
 #include "linalg/matrix.h"
 #include "linalg/transformations.h"
+#include "chunk/chunk.h"
+#include "chunk/triangulate.h"
+#include "chunk/shader.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -12,155 +15,52 @@
 // Key definitions for XCB
 #define KEY_LEFT 113
 #define KEY_RIGHT 114
-
-struct shader_data {
-    mcc_vec3f *positions;
-    mcc_vec2f *texcoords;
-    size_t vertex_count;
-    mcc_mat4f mvp;
-};
-
-/**
- * Number of varyings shared from the vertex to fragment shaders
- */
-const uint32_t SHADERS_VARYING_COUNT = 1;
-
-void my_vertex_shader_fn(struct mcc_cpurast_vertex_shader_input *input) {
-    struct shader_data *data = input->o_in_data;
-
-    mcc_vec3f pos3 = data->positions[input->in_vertex_idx];
-    mcc_vec2f uv = data->texcoords[input->in_vertex_idx];
-
-    mcc_vec4f pos4 = (mcc_vec4f){{ pos3.x, pos3.y, pos3.z, 1.f }};
-    input->out_position = mcc_mat4f_mul_vec4f(data->mvp, pos4);
-
-    mcc_vec4f out4 = input->out_position;
-    mcc_vec3f out3 = mcc_vec3f_scale(out4.xyz, 1.f / out4.w);
-    
-    // input->out_position = (mcc_vec4f){{ pos3.x, pos3.y, pos3.z, 1.f }};
-    input->r_out_varyings[0].vec4f = (mcc_vec4f){{ uv.x, uv.y, 0.f, 1.f }};
-}
-
-void my_fragment_shader_fn(struct mcc_cpurast_fragment_shader_input *input) {
-    input->out_color = input->r_in_varyings[0].vec4f;
-}
+#define KEY_UP 111
+#define KEY_DOWN 116
 
 int main() {
     struct mcc_window *window = mcc_window_create((struct mcc_create_window_cfg){
-        .title = "MCC!",
-        .height = 100,
-        .width = 100,
-        .min_height = 0,
-        .min_width = 0,
+        .title = "MCC Chunk Viewer",
+        .height = 800,
+        .width = 800,
+        .min_height = 400,
+        .min_width = 400,
     });
 
     mcc_window_open(window);
 
-    mcc_vec3f vertices[] = {
-        // front face (+Z)
-        {{-1.f, -1.f,  1.f}},
-        {{ 1.f, -1.f,  1.f}},
-        {{ 1.f,  1.f,  1.f}},
-        {{-1.f, -1.f,  1.f}},
-        {{ 1.f,  1.f,  1.f}},
-        {{-1.f,  1.f,  1.f}},
-        // back face (-Z)
-        {{ 1.f, -1.f, -1.f}},
-        {{-1.f, -1.f, -1.f}},
-        {{-1.f,  1.f, -1.f}},
-        {{ 1.f, -1.f, -1.f}},
-        {{-1.f,  1.f, -1.f}},
-        {{ 1.f,  1.f, -1.f}},
-        // right face (+X)
-        {{ 1.f, -1.f,  1.f}},
-        {{ 1.f, -1.f, -1.f}},
-        {{ 1.f,  1.f, -1.f}},
-        {{ 1.f, -1.f,  1.f}},
-        {{ 1.f,  1.f, -1.f}},
-        {{ 1.f,  1.f,  1.f}},
-        // left face (-X)
-        {{-1.f, -1.f, -1.f}},
-        {{-1.f, -1.f,  1.f}},
-        {{-1.f,  1.f,  1.f}},
-        {{-1.f, -1.f, -1.f}},
-        {{-1.f,  1.f,  1.f}},
-        {{-1.f,  1.f, -1.f}},
-        // top face (+Y)
-        {{-1.f,  1.f,  1.f}},
-        {{ 1.f,  1.f,  1.f}},
-        {{ 1.f,  1.f, -1.f}},
-        {{-1.f,  1.f,  1.f}},
-        {{ 1.f,  1.f, -1.f}},
-        {{-1.f,  1.f, -1.f}},
-        // bottom face (-Y)
-        {{-1.f, -1.f,  1.f}},
-        {{-1.f, -1.f, -1.f}},
-        {{ 1.f, -1.f, -1.f}},
-        {{-1.f, -1.f,  1.f}},
-        {{ 1.f, -1.f, -1.f}},
-        {{ 1.f, -1.f,  1.f}},
+    // Generate a chunk with seed 0
+    struct mcc_chunk_data chunk_data = {
+        .x = 0,
+        .z = 0
     };
-
-    mcc_vec2f texcoords[] = {
-        // front face
-        {{0.f, 0.f}}, {{1.f, 0.f}}, {{1.f, 1.f}},
-        {{0.f, 0.f}}, {{1.f, 1.f}}, {{0.f, 1.f}},
-        // back face
-        {{0.f, 0.f}}, {{1.f, 0.f}}, {{1.f, 1.f}},
-        {{0.f, 0.f}}, {{1.f, 1.f}}, {{0.f, 1.f}},
-        // right face
-        {{0.f, 0.f}}, {{1.f, 0.f}}, {{1.f, 1.f}},
-        {{0.f, 0.f}}, {{1.f, 1.f}}, {{0.f, 1.f}},
-        // left face
-        {{0.f, 0.f}}, {{1.f, 0.f}}, {{1.f, 1.f}},
-        {{0.f, 0.f}}, {{1.f, 1.f}}, {{0.f, 1.f}},
-        // top face
-        {{0.f, 0.f}}, {{1.f, 0.f}}, {{1.f, 1.f}},
-        {{0.f, 0.f}}, {{1.f, 1.f}}, {{0.f, 1.f}},
-        // bottom face
-        {{0.f, 0.f}}, {{1.f, 0.f}}, {{1.f, 1.f}},
-        {{0.f, 0.f}}, {{1.f, 1.f}}, {{0.f, 1.f}},
-    };
-
-    struct shader_data shader_data = {
-        .positions = vertices,
-        .texcoords = texcoords,
-        .vertex_count = sizeof(vertices) / sizeof(*vertices),
-        .mvp = mcc_mat4f_scale_xyz(0.5f, 0.5f, 0.5f),
-    };
-
-    struct mcc_vertex_shader vertex_shader = {
-        .r_fn = my_vertex_shader_fn,
-        .varying_count = SHADERS_VARYING_COUNT,
-    };
-    struct mcc_fragment_shader fragment_shader = {
-        .r_fn = my_fragment_shader_fn,
-        .varying_count = SHADERS_VARYING_COUNT,
-    };
-
-    struct mcc_cpurast_render_config render_config = {
-        .r_attachment = NULL, // Set before each render
-
-        .o_vertex_shader_data = &shader_data,
-        .r_vertex_shader = &vertex_shader,
-
-        .o_fragment_shader_data = &shader_data,
-        .r_fragment_shader = &fragment_shader,
-
-        .culling_mode = MCC_CPURAST_CULLING_MODE_CCW,
-        .o_depth_comparison_fn = mcc_depth_comparison_fn_lt,
-
-        .vertex_count = shader_data.vertex_count,
-        .vertex_processing = MCC_CPURAST_VERTEX_PROCESSING_TRIANGLE_LIST,
+    mcc_chunk_generate(0, &chunk_data);
+    
+    // Create a mesh from the chunk data
+    struct mcc_chunk_mesh chunk_mesh;
+    mcc_chunk_mesh_init(&chunk_mesh);
+    mcc_chunk_mesh_create(&chunk_mesh, &chunk_data);
+    
+    printf("Generated chunk mesh with %zu vertices\n", chunk_mesh.vertex_count);
+    
+    // Render object to pass to shader
+    struct mcc_chunk_render_object render_object = {
+        .mesh = &chunk_mesh,
+        .mvp = mcc_mat4f_identity() // Initial MVP, will be updated each frame
     };
 
     struct mcc_cpurast_clear_config clear_config = {
-        .clear_depth = 1.,
-        .clear_color = { 0., 0., 0., 1. },
+        .clear_depth = 1.0f,
+        .clear_color = { 0.4f, 0.6f, 0.9f, 1.0f }, // Sky blue
     };
 
-    float rotation_angle = 0.0f;
-    const float rotation_delta = 0.1f; // Amount to rotate per key press
+    // Camera control variables
+    float rotation_x = 0.5f;  // Looking down slightly to see the bottom
+    float rotation_y = 0.0f;
+    float zoom = 45.0f;       // Distance from origin
+    
+    const float rotation_delta = 0.1f;
+    const float zoom_delta = 2.0f;
 
     for (bool close = false; !close;) {
         union mcc_window_event event = mcc_window_wait_next_event(window);
@@ -175,10 +75,25 @@ int main() {
         case MCC_WINDOW_EVENT_KEY_PRESS:
             printf("Key pressed: %u\n", event.key_press.keycode);
             if (event.key_press.keycode == KEY_LEFT) {
-                rotation_angle -= rotation_delta;
+                rotation_y -= rotation_delta;
                 need_redraw = true;
             } else if (event.key_press.keycode == KEY_RIGHT) {
-                rotation_angle += rotation_delta;
+                rotation_y += rotation_delta;
+                need_redraw = true;
+            } else if (event.key_press.keycode == KEY_UP) {
+                rotation_x += rotation_delta;
+                need_redraw = true;
+            } else if (event.key_press.keycode == KEY_DOWN) {
+                rotation_x -= rotation_delta;
+                need_redraw = true;
+            } else if (event.key_press.keycode == 38 /* 'a' */) {
+                zoom -= zoom_delta;
+                if (zoom < 5.0f) zoom = 5.0f;
+                need_redraw = true;
+            } else if (event.key_press.keycode == 52 /* 'z' */) {
+                zoom += zoom_delta;
+                need_redraw = true;
+            } else if (event.key_press.keycode == 27) {
                 need_redraw = true;
             }
             break;
@@ -204,41 +119,70 @@ int main() {
 
             /*
              * Update the model view projection matrix
+             * Position the camera to see the bottom of the chunk
              */
-            mcc_mat4f model = mcc_mat4f_rotate_y(rotation_angle);
-            // Position the camera at {0,0,-3} (so move all object to {0,0,3})
-            mcc_mat4f view = mcc_mat4f_translate_z(3.f);
+            
+            // Model transformations - center the chunk and scale it appropriately
+            // (chunk is 16x256x16, so scale to make it visible)
+            mcc_mat4f model = mcc_mat4f_identity();
+            model = mcc_mat4f_mul(model, mcc_mat4f_translate_x(0.0f)); // Center X
+            model = mcc_mat4f_mul(model, mcc_mat4f_translate_z(0.0f)); // Center Z
+            // model = mcc_mat4f_mul(model, mcc_mat4f_scale_xyz(0.2f, 0.2f, 0.2f)); // Scale down
+            
+            // View transformations - position camera to look at the bottom of the chunk
+            mcc_mat4f view = mcc_mat4f_identity();
+            view = mcc_mat4f_mul(view, mcc_mat4f_translate_z(zoom)); // Move back to see the chunk
+            view = mcc_mat4f_mul(view, mcc_mat4f_rotate_x(rotation_x)); // Tilt to see bottom
+            view = mcc_mat4f_mul(view, mcc_mat4f_rotate_y(rotation_y)); // Rotate around Y axis
+            
+            // Projection
             mcc_mat4f projection = mcc_mat4f_perspective(
                 (float)width / (float)height,
-                0.001f, 100.f,
-                MCC_PIf / 2.f
+                0.1f, 1000.0f,
+                MCC_PIf / 4.0f
             );
 
-            shader_data.mvp = mcc_mat4f_mul(projection, mcc_mat4f_mul(view, model));
+            render_object.mvp = mcc_mat4f_mul(projection, mcc_mat4f_mul(view, model));
 
             /*
-             * Update the config structs for the rendering and allocate image data
+             * Allocate image and depth buffers
              */
             uint8_t *image_data = calloc(1, bytes);
             float32_t *depth_data = calloc(1, width * height * sizeof(float32_t));
             struct mcc_cpurast_rendering_attachment attachment = {
                 .o_depth = &(struct mcc_cpurast_rendering_depth_attachment) { .r_data = depth_data },
                 .o_color = &(struct mcc_cpurast_rendering_color_attachment) { .r_data = image_data, },
-                .width = width,
-                .height = height,
+                .width = safe_to_u32(width),
+                .height = safe_to_u32(height),
             };
-            render_config.r_attachment = &attachment;
+            
+            // Setup render configuration using our chunk shaders
+            struct mcc_cpurast_render_config render_config;
+            mcc_chunk_render_config(
+                &render_config,
+                &render_object,
+                &attachment
+            );
+            
             clear_config.r_attachment = &attachment;
 
+            // Render the chunk
             mcc_cpurast_clear(&clear_config);
+            printf("Rendering...\n");
             mcc_cpurast_render(&render_config);
+            printf("Finished rendering!\n");
 
             mcc_window_put_image(window, image_data, geometry.width, geometry.height);
 
+            // Clean up resources
+            mcc_chunk_render_config_cleanup(&render_config);
             free(image_data);
+            free(depth_data);
         }
     }
 
+    // Clean up
+    mcc_chunk_mesh_free(&chunk_mesh);
     mcc_window_free(window);
 
     printf("Bye!\n");

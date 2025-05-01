@@ -1,6 +1,7 @@
 #include "cpu_rasterizer.h"
 #include "linalg/matrix.h"
 #include "linalg/vector.h"
+#include "safe_cast.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -214,7 +215,7 @@ void mcc_cpurast_render(const struct mcc_cpurast_render_config *r_config) {
         switch (r_config->vertex_processing) {
         case MCC_CPURAST_VERTEX_PROCESSING_TRIANGLE_LIST:
             for (size_t di = 0; di < 3; di++) {
-                vert_input.in_vertex_idx = vertex_idx + di;
+                vert_input.in_vertex_idx = vertex_idx + safe_to_u32(di);
                 vert_input.r_out_varyings = vertices[di].varyings;
                 r_config->r_vertex_shader->r_fn(&vert_input);
                 vertices[di].pos4 = vert_input.out_position;
@@ -254,11 +255,14 @@ void mcc_cpurast_render(const struct mcc_cpurast_render_config *r_config) {
 
         for (uint32_t y = 0; y < r_config->r_attachment->height; y++) {
             for (uint32_t x = 0; x < r_config->r_attachment->width; x++) {
-                size_t idx = x + y * r_config->r_attachment->width;
+                size_t pixel_idx = x + y * r_config->r_attachment->width;
+                float fx = (float)x + 0.5f;
+                float fy = (float)y + 0.5f;
+
                 // Normalized screen coordinates
                 mcc_vec2f screen_pos = {{
-                    (2.f * ((float)x + 0.5f) / wf) - 1.f,
-                    (2.f * ((float)y + 0.5f) / hf) - 1.f,
+                    (fx / wf) * 2.f - 1.f,
+                    (fy / hf) *-2.f + 1.f,
                 }};
 
                 auto barycentric = mcc_calculate_barycentric(p0, p1, p2, screen_pos);
@@ -274,7 +278,7 @@ void mcc_cpurast_render(const struct mcc_cpurast_render_config *r_config) {
                 if (
                     depth_attachment &&
                     r_config->o_depth_comparison_fn &&
-                    !r_config->o_depth_comparison_fn(depth_attachment->r_data[idx], depth)
+                    !r_config->o_depth_comparison_fn(depth_attachment->r_data[pixel_idx], depth)
                 ) {
                     continue;
                 }
@@ -290,14 +294,14 @@ void mcc_cpurast_render(const struct mcc_cpurast_render_config *r_config) {
                 r_config->r_fragment_shader->r_fn(&frag_input);
 
                 if (depth_attachment) {
-                    depth_attachment->r_data[idx] = depth;
+                    depth_attachment->r_data[pixel_idx] = depth;
                 }
 
                 if (color_attachment) {
-                    color_attachment->r_data[idx*4+0] = (uint8_t)(frag_input.out_color.b * 255.f);
-                    color_attachment->r_data[idx*4+1] = (uint8_t)(frag_input.out_color.g * 255.f);
-                    color_attachment->r_data[idx*4+2] = (uint8_t)(frag_input.out_color.r * 255.f);
-                    color_attachment->r_data[idx*4+3] = (uint8_t)(frag_input.out_color.a * 255.f);
+                    color_attachment->r_data[pixel_idx*4+0] = (uint8_t)(frag_input.out_color.b * 255.f);
+                    color_attachment->r_data[pixel_idx*4+1] = (uint8_t)(frag_input.out_color.g * 255.f);
+                    color_attachment->r_data[pixel_idx*4+2] = (uint8_t)(frag_input.out_color.r * 255.f);
+                    color_attachment->r_data[pixel_idx*4+3] = (uint8_t)(frag_input.out_color.a * 255.f);
                 }
             }
         }
