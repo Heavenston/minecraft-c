@@ -15,7 +15,7 @@
 
 struct shader_data {
     mcc_vec3f *positions;
-    mcc_vec4f *colors;
+    mcc_vec2f *texcoords;
     size_t vertex_count;
     mcc_mat4f mvp;
 };
@@ -29,11 +29,13 @@ void my_vertex_shader_fn(struct mcc_cpurast_vertex_shader_input *input) {
     struct shader_data *data = input->o_in_data;
 
     mcc_vec3f pos3 = data->positions[input->in_vertex_idx];
+    mcc_vec2f uv = data->texcoords[input->in_vertex_idx];
+
     mcc_vec4f pos4 = (mcc_vec4f){{ pos3.x, pos3.y, pos3.z, 1.f }};
     input->out_position = mcc_mat4f_mul_vec4f(data->mvp, pos4);
     
     // input->out_position = (mcc_vec4f){{ pos3.x, pos3.y, pos3.z, 1.f }};
-    input->r_out_varyings[0].vec4f = data->colors[input->in_vertex_idx];
+    input->r_out_varyings[0].vec4f = (mcc_vec4f){{ uv.x, uv.y, 0.f, 1.f }};
 }
 
 void my_fragment_shader_fn(struct mcc_cpurast_fragment_shader_input *input) {
@@ -52,21 +54,74 @@ int main() {
     mcc_window_open(window);
 
     mcc_vec3f vertices[] = {
-        {{-1.f,-1.f, 0.f}},
-        {{ 1.f,-1.f, 0.f}},
-        {{-1.f, 1.f, 0.f}},
-        {{ 1.f, 1.f, 0.f}},
+        // front face (+Z)
+        {{-1.f, -1.f,  1.f}},
+        {{ 1.f, -1.f,  1.f}},
+        {{ 1.f,  1.f,  1.f}},
+        {{-1.f, -1.f,  1.f}},
+        {{ 1.f,  1.f,  1.f}},
+        {{-1.f,  1.f,  1.f}},
+        // back face (-Z)
+        {{ 1.f, -1.f, -1.f}},
+        {{-1.f, -1.f, -1.f}},
+        {{-1.f,  1.f, -1.f}},
+        {{ 1.f, -1.f, -1.f}},
+        {{-1.f,  1.f, -1.f}},
+        {{ 1.f,  1.f, -1.f}},
+        // right face (+X)
+        {{ 1.f, -1.f,  1.f}},
+        {{ 1.f, -1.f, -1.f}},
+        {{ 1.f,  1.f, -1.f}},
+        {{ 1.f, -1.f,  1.f}},
+        {{ 1.f,  1.f, -1.f}},
+        {{ 1.f,  1.f,  1.f}},
+        // left face (-X)
+        {{-1.f, -1.f, -1.f}},
+        {{-1.f, -1.f,  1.f}},
+        {{-1.f,  1.f,  1.f}},
+        {{-1.f, -1.f, -1.f}},
+        {{-1.f,  1.f,  1.f}},
+        {{-1.f,  1.f, -1.f}},
+        // top face (+Y)
+        {{-1.f,  1.f,  1.f}},
+        {{ 1.f,  1.f,  1.f}},
+        {{ 1.f,  1.f, -1.f}},
+        {{-1.f,  1.f,  1.f}},
+        {{ 1.f,  1.f, -1.f}},
+        {{-1.f,  1.f, -1.f}},
+        // bottom face (-Y)
+        {{-1.f, -1.f,  1.f}},
+        {{-1.f, -1.f, -1.f}},
+        {{ 1.f, -1.f, -1.f}},
+        {{-1.f, -1.f,  1.f}},
+        {{ 1.f, -1.f, -1.f}},
+        {{ 1.f, -1.f,  1.f}},
     };
-    mcc_vec4f colors[] = {
-        {{ 0.f, 0.f, 0.f, 1.f }},
-        {{ 1.f, 0.f, 0.f, 1.f }},
-        {{ 0.f, 1.f, 0.f, 1.f }},
-        {{ 1.f, 1.f, 0.f, 1.f }},
+
+    mcc_vec2f texcoords[] = {
+        // front face
+        {{0.f, 0.f}}, {{1.f, 0.f}}, {{1.f, 1.f}},
+        {{0.f, 0.f}}, {{1.f, 1.f}}, {{0.f, 1.f}},
+        // back face
+        {{0.f, 0.f}}, {{1.f, 0.f}}, {{1.f, 1.f}},
+        {{0.f, 0.f}}, {{1.f, 1.f}}, {{0.f, 1.f}},
+        // right face
+        {{0.f, 0.f}}, {{1.f, 0.f}}, {{1.f, 1.f}},
+        {{0.f, 0.f}}, {{1.f, 1.f}}, {{0.f, 1.f}},
+        // left face
+        {{0.f, 0.f}}, {{1.f, 0.f}}, {{1.f, 1.f}},
+        {{0.f, 0.f}}, {{1.f, 1.f}}, {{0.f, 1.f}},
+        // top face
+        {{0.f, 0.f}}, {{1.f, 0.f}}, {{1.f, 1.f}},
+        {{0.f, 0.f}}, {{1.f, 1.f}}, {{0.f, 1.f}},
+        // bottom face
+        {{0.f, 0.f}}, {{1.f, 0.f}}, {{1.f, 1.f}},
+        {{0.f, 0.f}}, {{1.f, 1.f}}, {{0.f, 1.f}},
     };
 
     struct shader_data shader_data = {
         .positions = vertices,
-        .colors = colors,
+        .texcoords = texcoords,
         .vertex_count = sizeof(vertices) / sizeof(*vertices),
         .mvp = mcc_mat4f_scale_xyz(0.5f, 0.5f, 0.5f),
     };
@@ -90,10 +145,10 @@ int main() {
         .r_fragment_shader = &fragment_shader,
 
         .culling_mode = MCC_CPURAST_CULLING_MODE_NONE,
-        .o_depth_comparison_fn = NULL,
+        .o_depth_comparison_fn = mcc_depth_comparison_fn_gt,
 
         .vertex_count = shader_data.vertex_count,
-        .vertex_processing = MCC_CPURAST_VERTEX_PROCESSING_TRIANGLE_STRIP,
+        .vertex_processing = MCC_CPURAST_VERTEX_PROCESSING_TRIANGLE_LIST,
     };
     
     float rotation_angle = 0.0f;
@@ -157,8 +212,9 @@ int main() {
              * Update the config structs for the rendering and allocate image data
              */
             uint8_t *image_data = calloc(1, bytes);
+            float32_t *depth_data = calloc(1, width * height * sizeof(float32_t));
             struct mcc_cpurast_rendering_attachment attachment = {
-                .o_depth = NULL, // No depth buffer
+                .o_depth = &(struct mcc_cpurast_rendering_depth_attachment) { .r_data = depth_data },
                 .o_color = &(struct mcc_cpurast_rendering_color_attachment) { .r_data = image_data, },
                 .width = width,
                 .height = height,
