@@ -1,3 +1,4 @@
+#include "linalg/constants.h"
 #include "safe_cast.h"
 #include "window/window.h"
 #include "cpu_rasterizer/cpu_rasterizer.h"
@@ -26,6 +27,10 @@ void my_vertex_shader_fn(struct mcc_cpurast_vertex_shader_input *input) {
     mcc_vec3f pos3 = data->positions[input->in_vertex_idx];
     mcc_vec4f pos4 = (mcc_vec4f){{ pos3.x, pos3.y, pos3.z, 1.f }};
     input->out_position = mcc_mat4f_mul_vec4f(data->mvp, pos4);
+
+    printf("a %d: %f, %f, %f, %f\n", input->in_vertex_idx, pos4.x, pos4.y, pos4.z, pos4.w);
+    printf("b %d: %f, %f, %f, %f\n", input->in_vertex_idx, input->out_position.x, input->out_position.y, input->out_position.z, input->out_position.w);
+    
     // input->out_position = (mcc_vec4f){{ pos3.x, pos3.y, pos3.z, 1.f }};
     input->r_out_varyings[0].vec4f = data->colors[input->in_vertex_idx];
 }
@@ -108,12 +113,39 @@ int main() {
             break;
         case MCC_WINDOW_EVENT_EXPOSE:
             auto geometry = mcc_window_get_geometry(window);
-            size_t height = safe_to_size_t(geometry.height);
-            size_t width = safe_to_size_t(geometry.width);
 
-            size_t bytes = height * width * 4;
+            size_t height = safe_to_size_t(geometry.height),
+                   width  = safe_to_size_t(geometry.width),
+                   bytes  = height * width * 4;
+
+            /*
+             * Update the model view projection matrix
+             */
+            mcc_mat4f model = mcc_mat4f_identity();
+            // Position the camera at {0,0,-3} (so move all object to {0,0,3})
+            mcc_mat4f view = mcc_mat4f_translate_z(-3.f);
+            mcc_mat4f projection = mcc_mat4f_perspective(
+                (float)width / (float)height,
+                0.001f, 100.f,
+                MCC_PIf / 2.f
+            );
+
+            shader_data.mvp = mcc_mat4f_mul(projection, mcc_mat4f_mul(view, model));
+            // shader_data.mvp = mcc_mat4f_identity();
+
+            printf("MVP Matrix:\n");
+            for (int px = 0; px < 4; px++) {
+                for (int py = 0; py < 4; py++) {
+                    printf("%f  ", shader_data.mvp.comps[px][py]);
+                }
+                printf("\n");
+            }
+            printf("\n");
+
+            /*
+             * Update the config structs for the rendering and allocate image data
+             */
             uint8_t *image_data = calloc(1, bytes);
-
             struct mcc_cpurast_rendering_attachment attachment = {
                 .o_depth = NULL, // No depth buffer
                 .o_color = &(struct mcc_cpurast_rendering_color_attachment) { .r_data = image_data, },
@@ -121,6 +153,7 @@ int main() {
                 .height = height,
             };
             render_config.r_attachment = &attachment;
+
             mcc_cpurast_render(&render_config);
 
             mcc_window_put_image(window, image_data, geometry.width, geometry.height);
