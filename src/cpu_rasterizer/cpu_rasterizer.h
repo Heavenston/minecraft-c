@@ -100,6 +100,17 @@ enum mcc_cpurast_culling_mode {
     MCC_CPURAST_CULLING_MODE_CCW,
 };
 
+enum mcc_cpurast_vertex_processing {
+    /**
+     * Each set of 3 vertices represent the 3 corner of each triangle.
+     */
+    MCC_CPURAST_VERTEX_PROCESSING_TRIANGLE_LIST,
+    /**
+     * 'The second and third vertex of every triangle are used as first two vertices of the next triangle'
+     */
+    MCC_CPURAST_VERTEX_PROCESSING_TRIANGLE_STRIP,
+};
+
 typedef bool (*mcc_depth_comparison_fn)(float previous, float new);
 
 bool mcc_depth_comparison_fn_alaways(float previous, float new);
@@ -137,6 +148,10 @@ struct mcc_cpurast_render_config {
      * Number of vertices to render. For now there is no vertex buffers, use internal ones!
      */
     uint32_t vertex_count;
+    /**
+     * How to process each vertices.
+     */
+    enum mcc_cpurast_vertex_processing vertex_processing;
 };
 
 void mcc_cpurast_render(const struct mcc_cpurast_render_config *r_config);

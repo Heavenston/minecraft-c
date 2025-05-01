@@ -3,7 +3,9 @@
 #include "linalg/vector.h"
 
 #include <assert.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 void mcc_cpurast_clear(const struct mcc_cpurast_clear_config *r_config) {
     uint32_t size = r_config->r_attachment->height * r_config->r_attachment->width;
@@ -149,15 +151,31 @@ static struct mcc_barycentric_coords mcc_calculate_barycentric(mcc_vec2f v0, mcc
     return result;
 }
 
+struct processed_vertex {
+    union mcc_cpurast_shaders_varying *varyings;
+    mcc_vec3f pos3;
+    mcc_vec4f pos4;
+};
+
+void process_vertex_init(struct processed_vertex *v, size_t varying_count) {
+    v->varyings = calloc(varying_count, sizeof(mcc_vec4f));
+}
+
+void process_vertex_free(struct processed_vertex *v) {
+    free(v->varyings);
+}
+
 void mcc_cpurast_render(const struct mcc_cpurast_render_config *r_config) {
     assert(r_config->r_fragment_shader->varying_count == r_config->r_vertex_shader->varying_count);
     size_t varying_count = r_config->r_vertex_shader->varying_count;
     auto depth_attachment = r_config->r_attachment->o_depth;
     auto color_attachment = r_config->r_attachment->o_color;
 
-    union mcc_cpurast_shaders_varying *varyings_v0 = calloc(varying_count, sizeof(mcc_vec4f));
-    union mcc_cpurast_shaders_varying *varyings_v1 = calloc(varying_count, sizeof(mcc_vec4f));
-    union mcc_cpurast_shaders_varying *varyings_v2 = calloc(varying_count, sizeof(mcc_vec4f));
+    const size_t vertex_per_primitive = 3;
+    struct processed_vertex vertices[3];
+    for (size_t i = 0; i < vertex_per_primitive; i++) {
+        process_vertex_init(&vertices[i], varying_count);
+    }
     union mcc_cpurast_shaders_varying *fragment_varyings = calloc(varying_count, sizeof(mcc_vec4f));
 
     struct mcc_cpurast_fragment_shader_input frag_input = {
@@ -168,23 +186,63 @@ void mcc_cpurast_render(const struct mcc_cpurast_render_config *r_config) {
         .o_in_data = r_config->o_vertex_shader_data,
     };
 
-    for (uint32_t vi = 0; vi < r_config->vertex_count; vi += 3) {
-        vert_input.in_vertex_idx = vi + 0;
-        vert_input.r_out_varyings = varyings_v0;
-        r_config->r_vertex_shader->r_fn(&vert_input);
-        mcc_vec3f v0 = mcc_vec3f_scale(vert_input.out_position.xyz, 1.f / vert_input.out_position.w);
+    uint32_t vertex_idx = 0;
+    size_t vertex_index_increment;
 
-        vert_input.in_vertex_idx = vi + 1;
-        vert_input.r_out_varyings = varyings_v1;
-        r_config->r_vertex_shader->r_fn(&vert_input);
-        mcc_vec3f v1 = mcc_vec3f_scale(vert_input.out_position.xyz, 1.f / vert_input.out_position.w);
+    // If we are in triangle strip, the first two vertices must be processed before
+    // for the next primitives, the first two vertices will be the ones from the
+    // previous primitive.
+    switch (r_config->vertex_processing) {
+    case MCC_CPURAST_VERTEX_PROCESSING_TRIANGLE_LIST:
+        vertex_index_increment = 3;
+        break;
+    case MCC_CPURAST_VERTEX_PROCESSING_TRIANGLE_STRIP:
+        vertex_index_increment = 1;
+        for (size_t di = 0; di < 2; di++, vertex_idx++) {
+            struct processed_vertex *pv = &vertices[di + 1];
 
-        vert_input.in_vertex_idx = vi + 2;
-        vert_input.r_out_varyings = varyings_v2;
-        r_config->r_vertex_shader->r_fn(&vert_input);
-        mcc_vec3f v2 = mcc_vec3f_scale(vert_input.out_position.xyz, 1.f / vert_input.out_position.w);
+            vert_input.in_vertex_idx = vertex_idx;
+            vert_input.r_out_varyings = pv->varyings;
+            r_config->r_vertex_shader->r_fn(&vert_input);
+            pv->pos4 = vert_input.out_position;
+            pv->pos3 = mcc_vec3f_scale(pv->pos4.xyz, 1.f / pv->pos4.w);
+        }
+        break;
+    }
 
-        bool isCcw = check_point(v2.xy, v0.xy, v1.xy);
+    for (; vertex_idx < r_config->vertex_count; vertex_idx += vertex_index_increment) {
+        switch (r_config->vertex_processing) {
+        case MCC_CPURAST_VERTEX_PROCESSING_TRIANGLE_LIST:
+            for (size_t di = 0; di < 3; di++) {
+                vert_input.in_vertex_idx = vertex_idx + di;
+                vert_input.r_out_varyings = vertices[di].varyings;
+                r_config->r_vertex_shader->r_fn(&vert_input);
+                vertices[di].pos4 = vert_input.out_position;
+                vertices[di].pos3 = mcc_vec3f_scale(vertices[di].pos4.xyz, 1.f / vertices[di].pos4.w);
+            }
+            break;
+        case MCC_CPURAST_VERTEX_PROCESSING_TRIANGLE_STRIP:
+            struct processed_vertex first = vertices[0];
+            vertices[0] = vertices[1];
+            vertices[1] = vertices[2];
+            vertices[2] = first;
+
+            vert_input.in_vertex_idx = vertex_idx;
+            vert_input.r_out_varyings = vertices[2].varyings;
+            r_config->r_vertex_shader->r_fn(&vert_input);
+            vertices[2].pos4 = vert_input.out_position;
+            vertices[2].pos3 = mcc_vec3f_scale(vertices[2].pos4.xyz, 1.f / vertices[2].pos4.w);
+            break;
+        }
+
+        mcc_vec3f v0 = vertices[0].pos3,
+                  v1 = vertices[1].pos3,
+                  v2 = vertices[2].pos3;
+        mcc_vec2f p0 = v0.xy,
+                  p1 = v1.xy,
+                  p2 = v2.xy;
+
+        bool isCcw = check_point(p2, p0, p1);
 
         if (r_config->culling_mode == MCC_CPURAST_CULLING_MODE_CW && !isCcw)
             continue;
@@ -203,7 +261,7 @@ void mcc_cpurast_render(const struct mcc_cpurast_render_config *r_config) {
                     (2.f * ((float)y + 0.5f) / hf) - 1.f,
                 }};
 
-                auto barycentric = mcc_calculate_barycentric(v0.xy, v1.xy, v2.xy, screen_pos);
+                auto barycentric = mcc_calculate_barycentric(p0, p1, p2, screen_pos);
                 if (!barycentric.isInside)
                     continue;
 
@@ -222,9 +280,9 @@ void mcc_cpurast_render(const struct mcc_cpurast_render_config *r_config) {
                 }
 
                 for (size_t varying_i = 0; varying_i < varying_count; varying_i++) {
-                    auto varv0 = mcc_vec4f_scale(varyings_v1[varying_i].vec4f, barycentric.u);
-                    auto varv1 = mcc_vec4f_scale(varyings_v2[varying_i].vec4f, barycentric.v);
-                    auto varv2 = mcc_vec4f_scale(varyings_v0[varying_i].vec4f, barycentric.w);
+                    auto varv1 = mcc_vec4f_scale(vertices[1].varyings[varying_i].vec4f, barycentric.u);
+                    auto varv2 = mcc_vec4f_scale(vertices[2].varyings[varying_i].vec4f, barycentric.v);
+                    auto varv0 = mcc_vec4f_scale(vertices[0].varyings[varying_i].vec4f, barycentric.w);
                     fragment_varyings[varying_i].vec4f = mcc_vec4f_add(varv0, mcc_vec4f_add(varv1, varv2));
                 }
 
@@ -245,8 +303,8 @@ void mcc_cpurast_render(const struct mcc_cpurast_render_config *r_config) {
         }
     }
 
-    free(varyings_v0);
-    free(varyings_v1);
-    free(varyings_v2);
+    for (size_t i = 0; i < vertex_per_primitive; i++) {
+        process_vertex_free(&vertices[i]);
+    }
     free(fragment_varyings);
 }

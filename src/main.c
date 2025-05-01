@@ -55,11 +55,13 @@ int main() {
         {{-1.f,-1.f, 0.f}},
         {{ 1.f,-1.f, 0.f}},
         {{-1.f, 1.f, 0.f}},
+        {{ 1.f, 1.f, 0.f}},
     };
     mcc_vec4f colors[] = {
+        {{ 0.f, 0.f, 0.f, 1.f }},
         {{ 1.f, 0.f, 0.f, 1.f }},
         {{ 0.f, 1.f, 0.f, 1.f }},
-        {{ 0.f, 0.f, 1.f, 1.f }},
+        {{ 1.f, 1.f, 0.f, 1.f }},
     };
 
     struct shader_data shader_data = {
@@ -91,6 +93,7 @@ int main() {
         .o_depth_comparison_fn = NULL,
 
         .vertex_count = shader_data.vertex_count,
+        .vertex_processing = MCC_CPURAST_VERTEX_PROCESSING_TRIANGLE_STRIP,
     };
     
     float rotation_angle = 0.0f;
