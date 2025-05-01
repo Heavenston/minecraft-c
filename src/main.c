@@ -9,6 +9,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+// Key definitions for XCB
+#define KEY_LEFT 113
+#define KEY_RIGHT 114
+
 struct shader_data {
     mcc_vec3f *positions;
     mcc_vec4f *colors;
@@ -27,9 +31,6 @@ void my_vertex_shader_fn(struct mcc_cpurast_vertex_shader_input *input) {
     mcc_vec3f pos3 = data->positions[input->in_vertex_idx];
     mcc_vec4f pos4 = (mcc_vec4f){{ pos3.x, pos3.y, pos3.z, 1.f }};
     input->out_position = mcc_mat4f_mul_vec4f(data->mvp, pos4);
-
-    printf("a %d: %f, %f, %f, %f\n", input->in_vertex_idx, pos4.x, pos4.y, pos4.z, pos4.w);
-    printf("b %d: %f, %f, %f, %f\n", input->in_vertex_idx, input->out_position.x, input->out_position.y, input->out_position.z, input->out_position.w);
     
     // input->out_position = (mcc_vec4f){{ pos3.x, pos3.y, pos3.z, 1.f }};
     input->r_out_varyings[0].vec4f = data->colors[input->in_vertex_idx];
@@ -91,9 +92,14 @@ int main() {
 
         .vertex_count = shader_data.vertex_count,
     };
+    
+    float rotation_angle = 0.0f;
+    const float rotation_delta = 0.1f; // Amount to rotate per key press
 
     for (bool close = false; !close;) {
         union mcc_window_event event = mcc_window_wait_next_event(window);
+        bool need_redraw = false;
+        
         switch (event.kind) {
         case MCC_WINDOW_EVENT_UNKNOWN:
             break;
@@ -102,6 +108,13 @@ int main() {
             break;
         case MCC_WINDOW_EVENT_KEY_PRESS:
             printf("Key pressed: %u\n", event.key_press.keycode);
+            if (event.key_press.keycode == KEY_LEFT) {
+                rotation_angle -= rotation_delta;
+                need_redraw = true;
+            } else if (event.key_press.keycode == KEY_RIGHT) {
+                rotation_angle += rotation_delta;
+                need_redraw = true;
+            }
             break;
         case MCC_WINDOW_EVENT_KEY_RELEASE:
             break;
@@ -112,6 +125,11 @@ int main() {
         case MCC_WINDOW_EVENT_BUTTON_RELEASE:
             break;
         case MCC_WINDOW_EVENT_EXPOSE:
+            need_redraw = true;
+            break;
+        }
+        
+        if (need_redraw) {
             auto geometry = mcc_window_get_geometry(window);
 
             size_t height = safe_to_size_t(geometry.height),
@@ -121,7 +139,7 @@ int main() {
             /*
              * Update the model view projection matrix
              */
-            mcc_mat4f model = mcc_mat4f_identity();
+            mcc_mat4f model = mcc_mat4f_rotate_y(rotation_angle);
             // Position the camera at {0,0,-3} (so move all object to {0,0,3})
             mcc_mat4f view = mcc_mat4f_translate_z(-3.f);
             mcc_mat4f projection = mcc_mat4f_perspective(
@@ -131,16 +149,6 @@ int main() {
             );
 
             shader_data.mvp = mcc_mat4f_mul(projection, mcc_mat4f_mul(view, model));
-            // shader_data.mvp = mcc_mat4f_identity();
-
-            printf("MVP Matrix:\n");
-            for (int px = 0; px < 4; px++) {
-                for (int py = 0; py < 4; py++) {
-                    printf("%f  ", shader_data.mvp.comps[px][py]);
-                }
-                printf("\n");
-            }
-            printf("\n");
 
             /*
              * Update the config structs for the rendering and allocate image data
@@ -159,7 +167,6 @@ int main() {
             mcc_window_put_image(window, image_data, geometry.width, geometry.height);
 
             free(image_data);
-            break;
         }
     }
 

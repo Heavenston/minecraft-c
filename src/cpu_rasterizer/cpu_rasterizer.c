@@ -209,8 +209,9 @@ void mcc_cpurast_render(const struct mcc_cpurast_render_config *r_config) {
 
                 float depth = v1.z * barycentric.u + v2.z * barycentric.v + v0.z * barycentric.w;
 
-                if (depth < 0. || depth > 1.)
-                    continue;
+                // TODO: Clipping
+                // if (depth < 0. || depth > 1.)
+                //     continue;
 
                 if (
                     depth_attachment &&
