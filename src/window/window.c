@@ -184,16 +184,20 @@ union mcc_window_event mcc_window_translate_event(struct mcc_window *w, xcb_gene
         break;
     }
     case XCB_KEY_PRESS: {
+        xcb_key_press_event_t* key_event = (xcb_key_press_event_t*)event;
         return (union mcc_window_event) {
-            .expose = {
+            .key_press = {
                 .kind = MCC_WINDOW_EVENT_KEY_PRESS,
+                .keycode = key_event->detail
             },
         };
     }
     case XCB_KEY_RELEASE: {
+        xcb_key_release_event_t* key_event = (xcb_key_release_event_t*)event;
         return (union mcc_window_event) {
-            .expose = {
+            .key_release = {
                 .kind = MCC_WINDOW_EVENT_KEY_RELEASE,
+                .keycode = key_event->detail
             },
         };
     }
@@ -266,6 +270,33 @@ void mcc_window_put_image(struct mcc_window *w, uint8_t *data, uint16_t width, u
         printf("Could not put image: %d (%d.%d)\n", error->error_code, error->major_code, error->minor_code);
         free(error);
     }
+}
+
+void mcc_window_request_redraw(struct mcc_window *w) {
+    if (!w->mapped) {
+        return;
+    }
+    
+    // Send an expose event to request a redraw
+    xcb_expose_event_t event = {
+        .window = w->window_id,
+        .response_type = XCB_EXPOSE,
+        .x = 0,
+        .y = 0,
+        .width = 0,  // 0 means whole window
+        .height = 0, // 0 means whole window
+        .count = 0   // 0 means no more expose events follow
+    };
+    
+    xcb_send_event(
+        w->connection,
+        false,                  // Don't propagate
+        w->window_id,
+        XCB_EVENT_MASK_EXPOSURE,
+        (const char*)&event
+    );
+    
+    xcb_flush(w->connection);
 }
 
 void mcc_window_free(struct mcc_window *w) {

@@ -30,10 +30,12 @@ struct mcc_window_event_delete_window {
 
 struct mcc_window_event_key_press {
     enum mcc_window_event_kind kind;
+    uint8_t keycode;
 };
 
 struct mcc_window_event_key_release {
     enum mcc_window_event_kind kind;
+    uint8_t keycode;
 };
 
 struct mcc_window_event_mouse_move {
@@ -83,5 +85,11 @@ union mcc_window_event mcc_window_wait_next_event(struct mcc_window *w);
  * Puts an image on the window (format should be BGRA and the alpha component is ignored)
  */
 void mcc_window_put_image(struct mcc_window *, uint8_t *data, uint16_t width, uint16_t height);
+
+/**
+ * Requests a redraw from the window manager
+ * This will generate an EXPOSE event for the window
+ */
+void mcc_window_request_redraw(struct mcc_window *);
 
 void mcc_window_free(struct mcc_window *);
