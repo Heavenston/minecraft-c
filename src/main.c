@@ -159,8 +159,8 @@ int main() {
             /*
              * Allocate image and depth buffers
              */
-            uint8_t *image_data = calloc(1, bytes);
-            float32_t *depth_data = calloc(1, width * height * sizeof(float32_t));
+            uint8_t *image_data = malloc(bytes);
+            float32_t *depth_data = malloc(bytes);
             struct mcc_cpurast_rendering_attachment attachment = {
                 .o_depth = &(struct mcc_cpurast_rendering_depth_attachment) { .r_data = depth_data },
                 .o_color = &(struct mcc_cpurast_rendering_color_attachment) { .r_data = image_data, },
