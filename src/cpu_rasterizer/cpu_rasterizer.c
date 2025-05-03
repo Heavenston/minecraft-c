@@ -1,6 +1,7 @@
 #include "cpu_rasterizer.h"
 #include "linalg/matrix.h"
 #include "linalg/vector.h"
+#include "linalg/scalars.h"
 #include "safe_cast.h"
 
 #include <assert.h>
@@ -180,9 +181,8 @@ struct mcc_rasterization_context {
 
 typedef void (*mcc_rasterize_triangle_fn)(const struct mcc_rasterization_context*);
 
-// Filter functions for different polygon modes
-static bool polygon_filter_fill(const struct mcc_barycentric_coords *coords) {
-    // All pixels inside the triangle are rendered
+static bool polygon_filter_fill(const struct mcc_barycentric_coords *) {
+    // All pixels are rendered
     return true;
 }
 
@@ -254,14 +254,28 @@ static void rasterize_triangle(const struct mcc_rasterization_context *r_context
               p1 = v1.xy,
               p2 = v2.xy;
 
-    // Screen dimensions
+    // Screen dimensions as floats
     float wf = (float)r_context->r_attachment->width;
     float hf = (float)r_context->r_attachment->height;
 
+    // AABB of the triangle in viewport coordinate
+    float min_xf = min3f(p0.x, p1.x, p2.x);
+    float min_yf = min3f(p0.y, p1.y, p2.y);
+    float max_xf = max3f(p0.x, p1.x, p2.x);
+    float max_yf = max3f(p0.y, p1.y, p2.y);
+
+    // AABB of the triangle in screen coordinate
+    // NOTE: Since y is inverted we need to take the min pos to have the max pixel
+    uint32_t min_x = (uint32_t)(( min_xf + 1.f) * 0.5f * wf - 0.5f);
+    uint32_t min_y = (uint32_t)((-max_yf + 1.f) * 0.5f * hf - 0.5f);
+    uint32_t max_x = (uint32_t)(( max_xf + 1.f) * 0.5f * wf + 0.5f);
+    uint32_t max_y = (uint32_t)((-min_yf + 1.f) * 0.5f * hf + 0.5f);
+
     // Iterate over pixels
-    for (uint32_t y = 0; y < r_context->r_attachment->height; y++) {
-        for (uint32_t x = 0; x < r_context->r_attachment->width; x++) {
+    for (uint32_t y = min_y; y < max_y; y++) {
+        for (uint32_t x = min_x; x < max_x; x++) {
             size_t pixel_idx = x + y * r_context->r_attachment->width;
+
             float fx = (float)x + 0.5f;
             float fy = (float)y + 0.5f;
 
