@@ -85,8 +85,9 @@ void mcc_chunk_render_config(
     mcc_chunk_fragment_shader(fs);
     out_config->r_fragment_shader = fs;
     
-    out_config->culling_mode = MCC_CPURAST_CULLING_MODE_CCW;
+    out_config->culling_mode = MCC_CPURAST_CULLING_MODE_NONE;
     out_config->o_depth_comparison_fn = mcc_depth_comparison_fn_lt;
+    out_config->polygon_mode = MCC_CPURAST_POLYGON_MODE_LINE;
     
     out_config->vertex_count = safe_to_u32(render_object->mesh->vertex_count);
     out_config->vertex_processing = MCC_CPURAST_VERTEX_PROCESSING_TRIANGLE_LIST;

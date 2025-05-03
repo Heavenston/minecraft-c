@@ -100,6 +100,12 @@ enum mcc_cpurast_culling_mode {
     MCC_CPURAST_CULLING_MODE_CCW,
 };
 
+enum mcc_cpurast_polygon_mode {
+    MCC_CPURAST_POLYGON_MODE_FILL,
+    MCC_CPURAST_POLYGON_MODE_LINE,
+    MCC_CPURAST_POLYGON_MODE_POINT,
+};
+
 enum mcc_cpurast_vertex_processing {
     /**
      * Each set of 3 vertices represent the 3 corner of each triangle.
@@ -131,6 +137,13 @@ struct mcc_cpurast_render_config {
     struct mcc_vertex_shader *r_vertex_shader;
 
     enum mcc_cpurast_culling_mode culling_mode;
+    /**
+     * Controls how triangles are rendered:
+     * - FILL (default): fills entire triangles
+     * - LINE: only renders triangle edges (wireframe)
+     * - POINT: only renders triangle vertices
+     */
+    enum mcc_cpurast_polygon_mode polygon_mode;
     /**
      * Ignored if r_attachment->o_depth is NULL.
      * 
