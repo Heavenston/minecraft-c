@@ -62,6 +62,8 @@ int main() {
     const float rotation_delta = 0.1f;
     const float zoom_delta = 2.0f;
 
+    bool enable_wireframe = false;
+
     for (bool close = false; !close;) {
         union mcc_window_event event = mcc_window_wait_next_event(window);
         bool need_redraw = false;
@@ -93,7 +95,8 @@ int main() {
             } else if (event.key_press.keycode == 52 /* 'z' */) {
                 zoom += zoom_delta;
                 need_redraw = true;
-            } else if (event.key_press.keycode == 27) {
+            } else if (event.key_press.keycode == 25 /* 'w' */) {
+                enable_wireframe = !enable_wireframe;
                 need_redraw = true;
             }
             break;
@@ -163,6 +166,11 @@ int main() {
                 &render_object,
                 &attachment
             );
+
+            if (enable_wireframe) {
+                render_config.culling_mode = MCC_CPURAST_CULLING_MODE_NONE;
+                render_config.polygon_mode = MCC_CPURAST_POLYGON_MODE_LINE;
+            }
             
             clear_config.r_attachment = &attachment;
 
