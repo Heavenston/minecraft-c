@@ -290,7 +290,7 @@ void mcc_cpurast_render(const struct mcc_cpurast_render_config *r_config) {
                     fragment_varyings[varying_i].vec4f = mcc_vec4f_add(varv0, mcc_vec4f_add(varv1, varv2));
                 }
 
-                frag_input.in_frag_coord = (mcc_vec3f){ .xy = screen_pos, .z = depth };
+                frag_input.in_frag_coord = (mcc_vec3f){{ screen_pos.x, screen_pos.y, depth }};
                 r_config->r_fragment_shader->r_fn(&frag_input);
 
                 if (depth_attachment) {

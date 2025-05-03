@@ -15,7 +15,7 @@
 static size_t mcc_hmap_murmur_oaat_32(const void *key, size_t h) {
     const char *str = key;
     for (; *str; ++str) {
-        h ^= *str;
+        h ^= (size_t)*str;
         h *= 0x5bd1e995;
         h ^= h >> 15;
     }
@@ -30,7 +30,7 @@ static size_t mcc_hmap_jenkins_oaat(const void *key, UNUSED size_t seed) {
     const char *str = key;
     size_t hash = 0;
     for (; *str; ++str) {
-        hash += *str;
+        hash += (size_t)*str;
         hash += (hash << 10);
         hash ^= (hash >> 6);
     }

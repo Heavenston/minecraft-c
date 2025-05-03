@@ -80,7 +80,7 @@ static inline mcc_mat3f mcc_mat3f_col(mcc_vec3f col1, mcc_vec3f col2, mcc_vec3f 
 }
 
 static inline mcc_mat4f mcc_mat4f_col(mcc_vec4f col1, mcc_vec4f col2, mcc_vec4f col3, mcc_vec4f col4) {
-    return mcc_mat4f_transpose((mcc_mat4f) { col1, col2, col3, col4 });
+    return mcc_mat4f_transpose((mcc_mat4f) {{ col1, col2, col3, col4 }});
 }
 
 static inline mcc_mat2f mcc_mat2f_ident() {

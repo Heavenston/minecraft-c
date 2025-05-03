@@ -11,7 +11,7 @@ const char *DEFAULT_MATERIAL_NAME = "unnamed";
 
 #define MCC_OBJ_ERROR(format, ...) \
     do { \
-        fprintf(stderr, "Error: " format "\n", ##__VA_ARGS__); \
+        fprintf(stderr, "Error: " format "\n" __VA_OPT__(,) __VA_ARGS__); \
         exit(EXIT_FAILURE); \
     } while (0)
 
