@@ -69,6 +69,13 @@ static inline void swap_winding(struct mcc_chunk_mesh *mesh, size_t start_idx) {
     mesh->texcoords[start_idx+1] = mesh->texcoords[start_idx+2];
     mesh->texcoords[start_idx+2] = temp_tex;
     
+    // Swap texids for first triangle if they exist
+    if (mesh->texids) {
+        uint8_t temp_texid = mesh->texids[start_idx+1];
+        mesh->texids[start_idx+1] = mesh->texids[start_idx+2];
+        mesh->texids[start_idx+2] = temp_texid;
+    }
+    
     // Swap vertices for the second triangle (3,4,5)
     temp_pos = mesh->positions[start_idx+4];
     mesh->positions[start_idx+4] = mesh->positions[start_idx+3];
@@ -77,6 +84,13 @@ static inline void swap_winding(struct mcc_chunk_mesh *mesh, size_t start_idx) {
     temp_tex = mesh->texcoords[start_idx+4];
     mesh->texcoords[start_idx+4] = mesh->texcoords[start_idx+3];
     mesh->texcoords[start_idx+3] = temp_tex;
+    
+    // Swap texids for second triangle if they exist
+    if (mesh->texids) {
+        uint8_t temp_texid = mesh->texids[start_idx+4];
+        mesh->texids[start_idx+4] = mesh->texids[start_idx+3];
+        mesh->texids[start_idx+3] = temp_texid;
+    }
 }
 
 static inline void append_face_x(struct face_mesh fm) {
@@ -126,7 +140,7 @@ static inline void append_face_z(struct face_mesh fm) {
     mesh->texcoords[si+5] = (mcc_vec2f){{ 1.f, 1.f }};
 
     // If clockwise is requested, swap vertices to reverse winding order
-    if (fm.clockwise) {
+    if (!fm.clockwise) {
         swap_winding(mesh, si);
     }
 }
@@ -188,7 +202,7 @@ static inline void generate_block_face_nx(struct chunk_block_meshing m) {
         .r_mesh = m.r_mesh,
         .start_idx = vi,
         .x = (float)m.x, .y = (float)m.y, .z = (float)m.z,
-        .clockwise = true,  // We want clockwise winding for -X face (looking from outside)
+        .clockwise = false,  // Changed to counter-clockwise for -X face when using CW culling
     });
 }
 
@@ -213,7 +227,7 @@ static inline void generate_block_face_px(struct chunk_block_meshing m) {
         .r_mesh = m.r_mesh,
         .start_idx = vi,
         .x = (float)m.x + 1.f, .y = (float)m.y, .z = (float)m.z,
-        .clockwise = false,  // Counter-clockwise winding for +X face (looking from outside)
+        .clockwise = true,  // Changed to clockwise for +X face when using CW culling
     });
 }
 
@@ -238,7 +252,7 @@ static inline void generate_block_face_nz(struct chunk_block_meshing m) {
         .r_mesh = m.r_mesh,
         .start_idx = vi,
         .x = (float)m.x, .y = (float)m.y, .z = (float)m.z,
-        .clockwise = true,  // Clockwise winding for -Z face (looking from outside)
+        .clockwise = false,  // Changed to counter-clockwise for -Z face when using CW culling
     });
 }
 
@@ -263,7 +277,7 @@ static inline void generate_block_face_pz(struct chunk_block_meshing m) {
         .r_mesh = m.r_mesh,
         .start_idx = vi,
         .x = (float)m.x, .y = (float)m.y, .z = (float)m.z + 1.f,
-        .clockwise = false,  // Counter-clockwise winding for +Z face (looking from outside)
+        .clockwise = true,  // Changed to clockwise for +Z face when using CW culling
     });
 }
 
@@ -288,7 +302,7 @@ static inline void generate_block_face_ny(struct chunk_block_meshing m) {
         .r_mesh = m.r_mesh,
         .start_idx = vi,
         .x = (float)m.x, .y = (float)m.y, .z = (float)m.z,
-        .clockwise = true,  // Clockwise winding for -Y face (looking from outside)
+        .clockwise = false,  // Changed to counter-clockwise for -Y face when using CW culling
     });
 }
 
@@ -313,7 +327,7 @@ static inline void generate_block_face_py(struct chunk_block_meshing m) {
         .r_mesh = m.r_mesh,
         .start_idx = vi,
         .x = (float)m.x, .y = (float)m.y + 1.f, .z = (float)m.z,
-        .clockwise = false,  // Counter-clockwise winding for +Y face (looking from outside)
+        .clockwise = true,  // Changed to clockwise for +Y face when using CW culling
     });
 }
 
