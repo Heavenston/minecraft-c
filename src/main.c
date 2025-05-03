@@ -8,6 +8,8 @@
 #include "chunk/triangulate.h"
 #include "chunk/shader.h"
 
+#include <time.h>
+#include <sys/time.h>
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,6 +19,13 @@
 #define KEY_RIGHT 114
 #define KEY_UP 111
 #define KEY_DOWN 116
+
+static inline long long diff_ns(struct timespec start,
+                                struct timespec end)
+{
+    return (long long)(end.tv_sec - start.tv_sec) * 1000000000LL
+         + (end.tv_nsec - start.tv_nsec);
+}
 
 int main() {
     struct mcc_window *window = mcc_window_create((struct mcc_create_window_cfg){
@@ -177,8 +186,13 @@ int main() {
             // Render the chunk
             mcc_cpurast_clear(&clear_config);
             printf("Rendering...\n");
+
+            struct timespec t0, t1;
+            timespec_get(&t0, TIME_UTC);
             mcc_cpurast_render(&render_config);
-            printf("Finished rendering!\n");
+            timespec_get(&t1, TIME_UTC);
+
+            printf("Finished rendering (took %fms)!\n", (double)diff_ns(t0, t1) / 1'000'000.);
 
             mcc_window_put_image(window, image_data, geometry.width, geometry.height);
 
