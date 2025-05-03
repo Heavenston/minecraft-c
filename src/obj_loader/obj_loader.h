@@ -1,9 +1,5 @@
 #pragma once
 
-/*
- * LLM generated convertion from my C++ obj loader.
- */
-
 #include "linalg/vector.h"
 
 #include <stdint.h>

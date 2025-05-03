@@ -1,5 +1,6 @@
 #include "obj_loader.h"
 #include "../hash_map/hash_map.h"
+#include "../safe_cast.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
@@ -13,18 +14,6 @@ const char *DEFAULT_MATERIAL_NAME = "unnamed";
         fprintf(stderr, "Error: " format "\n", ##__VA_ARGS__); \
         exit(EXIT_FAILURE); \
     } while (0)
-
-/**
- * IndexGroup structure for tracking unique vertex attributes
- */
-typedef struct {
-    __uint128_t key;      /* Composite key for hash and comparison */
-    uint32_t v_idx;       /* Position index */
-    uint32_t vt_idx;      /* Texture coordinate index */
-    uint32_t vn_idx;      /* Normal index */
-    bool has_vt;          /* Has texture coordinate */
-    bool has_vn;          /* Has normal */
-} IndexGroup;
 
 static void mcc_obj_material_init(struct mcc_obj_material *material) {
     if (!material)
@@ -47,8 +36,7 @@ static void mcc_obj_material_init(struct mcc_obj_material *material) {
 static void mcc_obj_material_free(struct mcc_obj_material *material) {
     if (material->r_name != DEFAULT_MATERIAL_NAME)
         free((char*)material->r_name);
-    if (material->o_diffuse_map)
-        free(material->o_diffuse_map);
+    free(material->o_diffuse_map);
 }
 
 static void mcc_obj_vertex_group_init(struct mcc_obj_vertex_group *group) {
@@ -58,16 +46,8 @@ static void mcc_obj_vertex_group_init(struct mcc_obj_vertex_group *group) {
     *group = (struct mcc_obj_vertex_group) {
         .indices = NULL,
         .indices_size = 0,
-        .material_index = ~0UL
+        .material_index = SIZE_MAX
     };
-}
-
-static void mcc_obj_vertex_group_free(struct mcc_obj_vertex_group *group) {
-    if (!group)
-        return;
-    
-    if (group->indices)
-        free(group->indices);
 }
 
 static bool mcc_obj_object_init(struct mcc_obj_object *obj, const char *name) {
@@ -97,33 +77,6 @@ static bool mcc_obj_object_init(struct mcc_obj_object *obj, const char *name) {
     };
     
     return true;
-}
-
-static void mcc_obj_object_free(struct mcc_obj_object *obj) {
-    if (!obj)
-        return;
-    
-    if (obj->o_name)
-        free((char*)obj->o_name);
-    
-    if (obj->o_positions)
-        free(obj->o_positions);
-    
-    if (obj->o_texture_coordinates)
-        free(obj->o_texture_coordinates);
-    
-    if (obj->o_normals)
-        free(obj->o_normals);
-    
-    if (obj->o_colors)
-        free(obj->o_colors);
-    
-    for (size_t i = 0; i < obj->vertex_groups_size; i++) {
-        if (obj->o_vertex_groups[i].indices)
-            free(obj->o_vertex_groups[i].indices);
-    }
-    
-    free(obj->o_vertex_groups);
 }
 
 // Get directory from a filepath
@@ -310,156 +263,6 @@ struct mcc_obj_loaded_obj *mcc_obj_load_path(const char *path) {
     return obj;
 }
 
-// Simple string hash function for material name lookup
-static size_t hash_string(const char *str) {
-    size_t hash = 5381;
-    int c;
-    
-    while ((c = *str++))
-        hash = ((hash << 5) + hash) + c; /* hash * 33 + c */
-    
-    return hash;
-}
-
-// Initialize a VertexIndexMap
-/**
- * Hash function for IndexGroup
- */
-static size_t index_group_hash(const void *key, size_t seed) {
-    const IndexGroup *group = key;
-    size_t hash = seed;
-    
-    // Use the lowest 64 bits of the composite key
-    hash ^= (size_t)(group->key & 0xFFFFFFFFFFFFFFFF);
-    
-    // Mix with upper bits
-    hash ^= (size_t)((group->key >> 64) & 0xFFFFFFFFFFFFFFFF);
-    
-    // Simple hash mixing
-    hash += (hash << 10);
-    hash ^= (hash >> 6);
-    
-    return hash;
-}
-
-/**
- * Compare function for IndexGroup keys
- */
-static int index_group_compare(const void *key1, const void *key2) {
-    const IndexGroup *a = key1;
-    const IndexGroup *b = key2;
-    
-    if (a->key < b->key) return -1;
-    if (a->key > b->key) return 1;
-    return 0;
-}
-
-/**
- * Wrapper function to free vertex index entries
- */
-static void vertex_index_entry_free(void *key, void *value) {
-    free(key);   // IndexGroup
-    free(value); // uint32_t index
-}
-
-/**
- * Frees memory associated with an IndexGroup hash map
- */
-static void vertex_index_map_free(struct mcc_hmap *map) {
-    if (!map)
-        return;
-        
-    // Free all keys and values
-    mcc_hmap_for_all(map, vertex_index_entry_free);
-    
-    // Free the hash map itself
-    mcc_hmap_destroy(map);
-}
-
-// Create an IndexGroup from indices
-static IndexGroup create_index_group(uint32_t v_idx, uint32_t vt_idx, uint32_t vn_idx, bool has_vt, bool has_vn) {
-    IndexGroup group;
-    
-    // Store indices
-    group.v_idx = v_idx;
-    group.vt_idx = vt_idx;
-    group.vn_idx = vn_idx;
-    group.has_vt = has_vt;
-    group.has_vn = has_vn;
-    
-    // Create a composite key similar to the C++ implementation
-    __uint128_t key = 0;
-    key |= (__uint128_t)v_idx;
-    key <<= 32;
-    key |= has_vt ? (__uint128_t)vt_idx : UINT32_MAX;
-    key <<= 32;
-    key |= has_vn ? (__uint128_t)vn_idx : UINT32_MAX;
-    
-    group.key = key;
-    return group;
-}
-
-// Compare two IndexGroups
-static bool index_group_equals(const IndexGroup *a, const IndexGroup *b) {
-    return a->key == b->key;
-}
-
-/**
- * Find an IndexGroup in the hash map
- * 
- * @param map The hash map to search in
- * @param group The IndexGroup to find
- * @param out_index Pointer to store the found index (if found)
- * @return true if the group was found, false otherwise
- */
-static bool vertex_index_map_find(struct mcc_hmap *map, const IndexGroup *group, uint32_t *out_index) {
-    if (!map || !group)
-        return false;
-        
-    struct mcc_hmap_element element = mcc_hmap_find(map, (void*)group);
-    if (element.value) {
-        if (out_index)
-            *out_index = *(uint32_t*)element.value;
-        return true;
-    }
-    
-    return false;
-}
-
-/**
- * Add an IndexGroup to the hash map
- * 
- * @param map The hash map to add to
- * @param group The IndexGroup to add
- * @param index The index to associate with the group
- */
-static void vertex_index_map_add(struct mcc_hmap *map, const IndexGroup *group, uint32_t index) {
-    if (!map || !group)
-        return;
-        
-    // Create a copy of the group to use as key
-    IndexGroup *group_copy = malloc(sizeof(IndexGroup));
-    if (!group_copy) {
-        MCC_OBJ_ERROR("Memory allocation failed for vertex index group");
-    }
-    *group_copy = *group;
-    
-    // Create a copy of the index to use as value
-    uint32_t *index_copy = malloc(sizeof(uint32_t));
-    if (!index_copy) {
-        free(group_copy);
-        MCC_OBJ_ERROR("Memory allocation failed for vertex index");
-    }
-    *index_copy = index;
-    
-    // Add to hash map
-    if (!mcc_hmap_add(map, group_copy, index_copy)) {
-        // If adding fails (e.g., duplicate), clean up
-        free(group_copy);
-        free(index_copy);
-    }
-}
-
 /**
  * Hash function for material name lookup
  * Uses Jenkins one-at-a-time hash
@@ -467,10 +270,10 @@ static void vertex_index_map_add(struct mcc_hmap *map, const IndexGroup *group, 
 static size_t material_hash(const void *key, size_t seed) {
     const char *str = key;
     size_t hash = seed;
-    int c;
+    unsigned char c;
     
-    while ((c = *str++)) {
-        hash += c;
+    while ((c = (unsigned char)*str++)) {
+        hash += (size_t)c;
         hash += (hash << 10);
         hash ^= (hash >> 6);
     }
@@ -536,18 +339,18 @@ static void material_map_add(struct mcc_hmap *map, const char *name, size_t inde
 
 /**
  * Finds a material index by name in the hash map
- * Returns ~0UL if not found
+ * Returns SIZE_MAX if not found
  */
 static size_t material_map_find(struct mcc_hmap *map, const char *name) {
     if (!map || !name)
-        return ~0UL;
+        return SIZE_MAX;
     
     struct mcc_hmap_element element = mcc_hmap_find(map, (void*)name);
     if (element.value) {
         return *(size_t*)element.value;
     }
     
-    return ~0UL; // Not found
+    return SIZE_MAX;
 }
 
 struct mcc_obj_loaded_obj *mcc_obj_load(FILE *file, const char *base_path) {
@@ -567,10 +370,10 @@ struct mcc_obj_loaded_obj *mcc_obj_load(FILE *file, const char *base_path) {
     
     // Material map for name lookup using our hash map
     struct mcc_hmap_create_params params = {
-        .capacity = 16,  // Start with a reasonable size
+        .capacity = 16,
         .hash_func = material_hash,
-        .second_hash_func = NULL,  // Use default
-        .compare_func = NULL       // Use default string comparison
+        .second_hash_func = NULL,
+        .compare_func = NULL
     };
     struct mcc_hmap *material_map = mcc_hmap_create(&params);
     if (!material_map) {
@@ -689,6 +492,8 @@ struct mcc_obj_loaded_obj *mcc_obj_load(FILE *file, const char *base_path) {
                     free(positions);
                     free(texture_coords);
                     free(normals);
+                    free(colors);
+                    material_map_free(material_map);
                     return NULL;
                 }
                 texture_coords = new_texture_coords;
@@ -710,6 +515,10 @@ struct mcc_obj_loaded_obj *mcc_obj_load(FILE *file, const char *base_path) {
                     free(positions);
                     free(texture_coords);
                     free(normals);
+                    if (colors) {
+                        free(colors);
+                    }
+                    material_map_free(material_map);
                     return NULL;
                 }
                 normals = new_normals;
@@ -723,41 +532,81 @@ struct mcc_obj_loaded_obj *mcc_obj_load(FILE *file, const char *base_path) {
             
             if (current_object) {
                 // Finalize current object
-                current_object->o_positions = malloc(positions_size * sizeof(mcc_vec4f));
-                if (!current_object->o_positions) {
-                    mcc_obj_loaded_obj_free(loaded_obj);
-                    free(positions);
-                    free(texture_coords);
-                    free(normals);
-                    return NULL;
+                if (positions_size > 0) {
+                    current_object->o_positions = malloc(positions_size * sizeof(mcc_vec4f));
+                    if (!current_object->o_positions) {
+                        mcc_obj_loaded_obj_free(loaded_obj);
+                        free(positions);
+                        if (texture_coords) {
+                            free(texture_coords);
+                        }
+                        if (normals) {
+                            free(normals);
+                        }
+                        free(colors);
+                        material_map_free(material_map);
+                        return NULL;
+                    }
+                    memcpy(current_object->o_positions, positions, positions_size * sizeof(mcc_vec4f));
+                    current_object->positions_size = positions_size;
                 }
                 
-                memcpy(current_object->o_positions, positions, positions_size * sizeof(mcc_vec4f));
-                current_object->positions_size = positions_size;
-                
-                current_object->o_texture_coordinates = malloc(texture_coords_size * sizeof(mcc_vec3f));
-                if (!current_object->o_texture_coordinates && texture_coords_size > 0) {
-                    mcc_obj_loaded_obj_free(loaded_obj);
-                    free(positions);
-                    free(texture_coords);
-                    free(normals);
-                    return NULL;
+                if (texture_coords_size > 0) {
+                    current_object->o_texture_coordinates = malloc(texture_coords_size * sizeof(mcc_vec3f));
+                    if (!current_object->o_texture_coordinates) {
+                        mcc_obj_loaded_obj_free(loaded_obj);
+                        free(positions);
+                        if (texture_coords) {
+                            free(texture_coords);
+                        }
+                        if (normals) {
+                            free(normals);
+                        }
+                        free(colors);
+                        material_map_free(material_map);
+                        return NULL;
+                    }
+                    memcpy(current_object->o_texture_coordinates, texture_coords, texture_coords_size * sizeof(mcc_vec3f));
+                    current_object->texture_coordinates_size = texture_coords_size;
                 }
                 
-                memcpy(current_object->o_texture_coordinates, texture_coords, texture_coords_size * sizeof(mcc_vec3f));
-                current_object->texture_coordinates_size = texture_coords_size;
-                
-                current_object->o_normals = malloc(normals_size * sizeof(mcc_vec3f));
-                if (!current_object->o_normals && normals_size > 0) {
-                    mcc_obj_loaded_obj_free(loaded_obj);
-                    free(positions);
-                    free(texture_coords);
-                    free(normals);
-                    return NULL;
+                if (normals_size > 0) {
+                    current_object->o_normals = malloc(normals_size * sizeof(mcc_vec3f));
+                    if (!current_object->o_normals) {
+                        mcc_obj_loaded_obj_free(loaded_obj);
+                        free(positions);
+                        if (texture_coords) {
+                            free(texture_coords);
+                        }
+                        if (normals) {
+                            free(normals);
+                        }
+                        free(colors);
+                        material_map_free(material_map);
+                        return NULL;
+                    }
+                    memcpy(current_object->o_normals, normals, normals_size * sizeof(mcc_vec3f));
+                    current_object->normals_size = normals_size;
                 }
                 
-                memcpy(current_object->o_normals, normals, normals_size * sizeof(mcc_vec3f));
-                current_object->normals_size = normals_size;
+                if (colors_size > 0) {
+                    current_object->o_colors = malloc(colors_size * sizeof(mcc_vec3f));
+                    if (!current_object->o_colors) {
+                        mcc_obj_loaded_obj_free(loaded_obj);
+                        free(positions);
+                        if (texture_coords) {
+                            free(texture_coords);
+                        }
+                        if (normals) {
+                            free(normals);
+                        }
+                        free(colors);
+                        material_map_free(material_map);
+                        return NULL;
+                    }
+                    memcpy(current_object->o_colors, colors, colors_size * sizeof(mcc_vec3f));
+                    current_object->colors_size = colors_size;
+                }
             }
             
             // Add new object to loaded_obj
@@ -766,8 +615,16 @@ struct mcc_obj_loaded_obj *mcc_obj_load(FILE *file, const char *base_path) {
             if (!new_objects) {
                 mcc_obj_loaded_obj_free(loaded_obj);
                 free(positions);
-                free(texture_coords);
-                free(normals);
+                if (texture_coords) {
+                    free(texture_coords);
+                }
+                if (normals) {
+                    free(normals);
+                }
+                if (colors) {
+                    free(colors);
+                }
+                material_map_free(material_map);
                 return NULL;
             }
             
@@ -777,8 +634,16 @@ struct mcc_obj_loaded_obj *mcc_obj_load(FILE *file, const char *base_path) {
             if (!mcc_obj_object_init(&loaded_obj->o_objects[loaded_obj->objects_size], name)) {
                 mcc_obj_loaded_obj_free(loaded_obj);
                 free(positions);
-                free(texture_coords);
-                free(normals);
+                if (texture_coords) {
+                    free(texture_coords);
+                }
+                if (normals) {
+                    free(normals);
+                }
+                if (colors) {
+                    free(colors);
+                }
+                material_map_free(material_map);
                 return NULL;
             }
             
@@ -796,6 +661,10 @@ struct mcc_obj_loaded_obj *mcc_obj_load(FILE *file, const char *base_path) {
                     free(positions);
                     free(texture_coords);
                     free(normals);
+                    if (colors) {
+                        free(colors);
+                    }
+                    material_map_free(material_map);
                     return NULL;
                 }
                 
@@ -807,6 +676,10 @@ struct mcc_obj_loaded_obj *mcc_obj_load(FILE *file, const char *base_path) {
                     free(positions);
                     free(texture_coords);
                     free(normals);
+                    if (colors) {
+                        free(colors);
+                    }
+                    material_map_free(material_map);
                     return NULL;
                 }
                 
@@ -823,6 +696,10 @@ struct mcc_obj_loaded_obj *mcc_obj_load(FILE *file, const char *base_path) {
                     free(positions);
                     free(texture_coords);
                     free(normals);
+                    if (colors) {
+                        free(colors);
+                    }
+                    material_map_free(material_map);
                     return NULL;
                 }
                 
@@ -853,8 +730,14 @@ struct mcc_obj_loaded_obj *mcc_obj_load(FILE *file, const char *base_path) {
                         free(indices);
                         mcc_obj_loaded_obj_free(loaded_obj);
                         free(positions);
-                        free(texture_coords);
-                        free(normals);
+                        if (texture_coords) {
+                            free(texture_coords);
+                        }
+                        if (normals) {
+                            free(normals);
+                        }
+                        free(colors);
+                        material_map_free(material_map);
                         return NULL;
                     }
                     indices = new_indices;
@@ -864,7 +747,13 @@ struct mcc_obj_loaded_obj *mcc_obj_load(FILE *file, const char *base_path) {
                 char *p = vertex_str;
                 char *endptr;
                 
-                uint32_t v_idx = strtoul(p, &endptr, 10) - 1; // OBJ indices are 1-based
+                unsigned long v_idx_raw = strtoul(p, &endptr, 10);
+                if (v_idx_raw == 0) {
+                    MCC_OBJ_ERROR("Position index must be at least 1");
+                }
+                v_idx_raw--;  // OBJ indices are 1-based
+                
+                uint32_t v_idx = safe_to_u32(v_idx_raw);
                 if (v_idx >= positions_size) {
                     MCC_OBJ_ERROR("Position index out of bounds: %u (max: %zu)", 
                                  v_idx + 1, positions_size);
@@ -876,10 +765,14 @@ struct mcc_obj_loaded_obj *mcc_obj_load(FILE *file, const char *base_path) {
                     // Parse texture coordinate index
                     p = endptr + 1;
                     if (*p != '/') { // Has texture coordinate
-                        uint32_t vt_idx = strtoul(p, &endptr, 10) - 1;
-                        if (vt_idx >= texture_coords_size && texture_coords_size > 0) {
-                            MCC_OBJ_ERROR("Texture coordinate index out of bounds: %u (max: %zu)",
-                                        vt_idx + 1, texture_coords_size);
+                        unsigned long vt_idx_raw = strtoul(p, &endptr, 10);
+                        if (vt_idx_raw > 0) { // Valid index
+                            vt_idx_raw--; // OBJ indices are 1-based
+                            uint32_t vt_idx = safe_to_u32(vt_idx_raw);
+                            if (vt_idx >= texture_coords_size && texture_coords_size > 0) {
+                                MCC_OBJ_ERROR("Texture coordinate index out of bounds: %u (max: %zu)",
+                                          vt_idx + 1, texture_coords_size);
+                            }
                         }
                     } else {
                         endptr = p;
@@ -889,10 +782,14 @@ struct mcc_obj_loaded_obj *mcc_obj_load(FILE *file, const char *base_path) {
                     if (*endptr == '/') {
                         p = endptr + 1;
                         if (*p != '\0') { // Has normal
-                            uint32_t vn_idx = strtoul(p, &endptr, 10) - 1;
-                            if (vn_idx >= normals_size && normals_size > 0) {
-                                MCC_OBJ_ERROR("Normal index out of bounds: %u (max: %zu)",
-                                            vn_idx + 1, normals_size);
+                            unsigned long vn_idx_raw = strtoul(p, &endptr, 10);
+                            if (vn_idx_raw > 0) { // Valid index
+                                vn_idx_raw--; // OBJ indices are 1-based
+                                uint32_t vn_idx = safe_to_u32(vn_idx_raw);
+                                if (vn_idx >= normals_size && normals_size > 0) {
+                                    MCC_OBJ_ERROR("Normal index out of bounds: %u (max: %zu)",
+                                              vn_idx + 1, normals_size);
+                                }
                             }
                         }
                     }
@@ -911,8 +808,16 @@ struct mcc_obj_loaded_obj *mcc_obj_load(FILE *file, const char *base_path) {
                 free(indices);
                 mcc_obj_loaded_obj_free(loaded_obj);
                 free(positions);
-                free(texture_coords);
-                free(normals);
+                if (texture_coords) {
+                    free(texture_coords);
+                }
+                if (normals) {
+                    free(normals);
+                }
+                if (colors) {
+                    free(colors);
+                }
+                material_map_free(material_map);
                 return NULL;
             }
             
@@ -975,6 +880,10 @@ struct mcc_obj_loaded_obj *mcc_obj_load(FILE *file, const char *base_path) {
                     free(positions);
                     free(texture_coords);
                     free(normals);
+                    if (colors) {
+                        free(colors);
+                    }
+                    material_map_free(material_map);
                     return NULL;
                 }
                 
@@ -1001,8 +910,16 @@ struct mcc_obj_loaded_obj *mcc_obj_load(FILE *file, const char *base_path) {
         if (!new_objects) {
             mcc_obj_loaded_obj_free(loaded_obj);
             free(positions);
-            free(texture_coords);
-            free(normals);
+            if (texture_coords) {
+                free(texture_coords);
+            }
+            if (normals) {
+                free(normals);
+            }
+            if (colors) {
+                free(colors);
+            }
+            material_map_free(material_map);
             return NULL;
         }
         
@@ -1012,8 +929,16 @@ struct mcc_obj_loaded_obj *mcc_obj_load(FILE *file, const char *base_path) {
         if (!mcc_obj_object_init(&loaded_obj->o_objects[loaded_obj->objects_size], "default")) {
             mcc_obj_loaded_obj_free(loaded_obj);
             free(positions);
-            free(texture_coords);
-            free(normals);
+            if (texture_coords) {
+                free(texture_coords);
+            }
+            if (normals) {
+                free(normals);
+            }
+            if (colors) {
+                free(colors);
+            }
+            material_map_free(material_map);
             return NULL;
         }
         
@@ -1022,41 +947,89 @@ struct mcc_obj_loaded_obj *mcc_obj_load(FILE *file, const char *base_path) {
     
     // Finalize current object if it exists
     if (current_object) {
-        current_object->o_positions = malloc(positions_size * sizeof(mcc_vec4f));
-        if (!current_object->o_positions && positions_size > 0) {
-            mcc_obj_loaded_obj_free(loaded_obj);
-            free(positions);
-            free(texture_coords);
-            free(normals);
-            return NULL;
+        if (positions_size > 0) {
+            current_object->o_positions = malloc(positions_size * sizeof(mcc_vec4f));
+            if (!current_object->o_positions) {
+                mcc_obj_loaded_obj_free(loaded_obj);
+                free(positions);
+                if (texture_coords) {
+                    free(texture_coords);
+                }
+                if (normals) {
+                    free(normals);
+                }
+                if (colors) {
+                    free(colors);
+                }
+                material_map_free(material_map);
+                return NULL;
+            }
+            memcpy(current_object->o_positions, positions, positions_size * sizeof(mcc_vec4f));
+            current_object->positions_size = positions_size;
         }
         
-        memcpy(current_object->o_positions, positions, positions_size * sizeof(mcc_vec4f));
-        current_object->positions_size = positions_size;
-        
-        current_object->o_texture_coordinates = malloc(texture_coords_size * sizeof(mcc_vec3f));
-        if (!current_object->o_texture_coordinates && texture_coords_size > 0) {
-            mcc_obj_loaded_obj_free(loaded_obj);
-            free(positions);
-            free(texture_coords);
-            free(normals);
-            return NULL;
+        if (texture_coords_size > 0) {
+            current_object->o_texture_coordinates = malloc(texture_coords_size * sizeof(mcc_vec3f));
+            if (!current_object->o_texture_coordinates) {
+                mcc_obj_loaded_obj_free(loaded_obj);
+                free(positions);
+                if (texture_coords) {
+                    free(texture_coords);
+                }
+                if (normals) {
+                    free(normals);
+                }
+                if (colors) {
+                    free(colors);
+                }
+                material_map_free(material_map);
+                return NULL;
+            }
+            memcpy(current_object->o_texture_coordinates, texture_coords, texture_coords_size * sizeof(mcc_vec3f));
+            current_object->texture_coordinates_size = texture_coords_size;
         }
         
-        memcpy(current_object->o_texture_coordinates, texture_coords, texture_coords_size * sizeof(mcc_vec3f));
-        current_object->texture_coordinates_size = texture_coords_size;
-        
-        current_object->o_normals = malloc(normals_size * sizeof(mcc_vec3f));
-        if (!current_object->o_normals && normals_size > 0) {
-            mcc_obj_loaded_obj_free(loaded_obj);
-            free(positions);
-            free(texture_coords);
-            free(normals);
-            return NULL;
+        if (normals_size > 0) {
+            current_object->o_normals = malloc(normals_size * sizeof(mcc_vec3f));
+            if (!current_object->o_normals) {
+                mcc_obj_loaded_obj_free(loaded_obj);
+                free(positions);
+                if (texture_coords) {
+                    free(texture_coords);
+                }
+                if (normals) {
+                    free(normals);
+                }
+                if (colors) {
+                    free(colors);
+                }
+                material_map_free(material_map);
+                return NULL;
+            }
+            memcpy(current_object->o_normals, normals, normals_size * sizeof(mcc_vec3f));
+            current_object->normals_size = normals_size;
         }
         
-        memcpy(current_object->o_normals, normals, normals_size * sizeof(mcc_vec3f));
-        current_object->normals_size = normals_size;
+        if (colors_size > 0) {
+            current_object->o_colors = malloc(colors_size * sizeof(mcc_vec3f));
+            if (!current_object->o_colors) {
+                mcc_obj_loaded_obj_free(loaded_obj);
+                free(positions);
+                if (texture_coords) {
+                    free(texture_coords);
+                }
+                if (normals) {
+                    free(normals);
+                }
+                if (colors) {
+                    free(colors);
+                }
+                material_map_free(material_map);
+                return NULL;
+            }
+            memcpy(current_object->o_colors, colors, colors_size * sizeof(mcc_vec3f));
+            current_object->colors_size = colors_size;
+        }
     }
     
     // Free the material map and temporary buffers
@@ -1077,39 +1050,26 @@ void mcc_obj_loaded_obj_free(struct mcc_obj_loaded_obj *obj) {
     for (size_t i = 0; i < obj->objects_size; i++) {
         struct mcc_obj_object *object = &obj->o_objects[i];
         
-        if (object->o_name)
-            free((char*)object->o_name);
-        
-        if (object->o_positions)
-            free(object->o_positions);
-        
-        if (object->o_texture_coordinates)
-            free(object->o_texture_coordinates);
-        
-        if (object->o_normals)
-            free(object->o_normals);
-        
-        if (object->o_colors)
-            free(object->o_colors);
+        free((char*)object->o_name);
+        free(object->o_positions);
+        free(object->o_texture_coordinates);
+        free(object->o_normals);
+        free(object->o_colors);
         
         for (size_t j = 0; j < object->vertex_groups_size; j++) {
-            if (object->o_vertex_groups[j].indices)
-                free(object->o_vertex_groups[j].indices);
+            free(object->o_vertex_groups[j].indices);
         }
         
-        if (object->o_vertex_groups)
-            free(object->o_vertex_groups);
+        free(object->o_vertex_groups);
     }
     
-    if (obj->o_objects)
-        free(obj->o_objects);
+    free(obj->o_objects);
     
     for (size_t i = 0; i < obj->materials_size; i++) {
         mcc_obj_material_free(&obj->o_materials[i]);
     }
     
-    if (obj->o_materials)
-        free(obj->o_materials);
+    free(obj->o_materials);
     
     free(obj);
 }
