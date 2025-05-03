@@ -3,6 +3,7 @@
 #include "cpu_rasterizer/cpu_rasterizer.h"
 #include "triangulate.h"
 #include "linalg/vector.h"
+#include "linalg/scalars.h"
 #include "safe_cast.h"
 
 #include <stddef.h>
@@ -12,7 +13,7 @@
  * Number of varyings shared from the vertex to fragment shaders:
  * 1. texid + block_type information
  */
-#define MCC_CHUNK_SHADER_VARYING_COUNT 1
+#define MCC_CHUNK_SHADER_VARYING_COUNT 2
 
 void mcc_chunk_vertex_shader_fn(struct mcc_cpurast_vertex_shader_input *input) {
     struct mcc_chunk_render_object *render_object = input->o_in_data;
@@ -21,6 +22,7 @@ void mcc_chunk_vertex_shader_fn(struct mcc_cpurast_vertex_shader_input *input) {
     // Get vertex data
     size_t vertex_idx = input->in_vertex_idx;
     mcc_vec3f position = mesh->positions[vertex_idx];
+    mcc_vec3f normal = mesh->normals[vertex_idx];
     uint8_t texid = mesh->texids[vertex_idx];
 
     // Transform vertex position
@@ -28,14 +30,19 @@ void mcc_chunk_vertex_shader_fn(struct mcc_cpurast_vertex_shader_input *input) {
     input->out_position = mcc_mat4f_mul_vec4f(render_object->mvp, pos_homogeneous);
 
     // Pass block type to fragment shader
-    input->r_out_varyings[0].vec4f = (mcc_vec4f){{ (float)texid + 0.5f, 0.0f, 0.0f, 0.0f }};
+    input->r_out_varyings[0].vec4f = (mcc_vec4f){{
+        (float)texid + 0.5f /* +0.5f is for the rounding to work predictably */,
+        0.0f, 0.0f, 0.0f
+    }};
+    input->r_out_varyings[1].vec4f = (mcc_vec4f){{
+        normal.x, normal.y, normal.z, 0.f
+    }};
 }
 
 void mcc_chunk_fragment_shader_fn(struct mcc_cpurast_fragment_shader_input *input) {
-    // Extract block type 
     uint8_t block_type = (uint8_t)input->r_in_varyings[0].vec4f.x;
+    mcc_vec3f normal = input->r_in_varyings[1].vec4f.xyz;
 
-    // Choose color based on block type
     switch (block_type) {
         case MCC_BLOCK_TYPE_STONE:
             input->out_color = (mcc_vec4f){{ 0.5f, 0.5f, 0.5f, 1.0f }}; // Gray
@@ -56,6 +63,15 @@ void mcc_chunk_fragment_shader_fn(struct mcc_cpurast_fragment_shader_input *inpu
             input->out_color = (mcc_vec4f){{ 1.0f, 0.0f, 1.0f, 1.0f }}; // Magenta for unknown
             break;
     }
+
+    mcc_vec3f light_dir = mcc_vec3f_normalized((mcc_vec3f){{ 1.f, 1.5f, -2.5f }});
+
+    float diffuse = clampf(mcc_vec3f_dot(normal, light_dir), 0.f, 1.f);
+    float ambient = 0.25f;
+    float cf = clampf(diffuse + ambient, 0.f, 1.f);
+
+    input->out_color = mcc_vec4f_scale(input->out_color, cf);
+    input->out_color.a = 1.f;
 }
 
 void mcc_chunk_vertex_shader(struct mcc_vertex_shader *out_shader) {
@@ -85,9 +101,9 @@ void mcc_chunk_render_config(
     mcc_chunk_fragment_shader(fs);
     out_config->r_fragment_shader = fs;
     
-    out_config->culling_mode = MCC_CPURAST_CULLING_MODE_NONE;
+    out_config->culling_mode = MCC_CPURAST_CULLING_MODE_CCW;
     out_config->o_depth_comparison_fn = mcc_depth_comparison_fn_lt;
-    out_config->polygon_mode = MCC_CPURAST_POLYGON_MODE_LINE;
+    out_config->polygon_mode = MCC_CPURAST_POLYGON_MODE_FILL;
     
     out_config->vertex_count = safe_to_u32(render_object->mesh->vertex_count);
     out_config->vertex_processing = MCC_CPURAST_VERTEX_PROCESSING_TRIANGLE_LIST;
