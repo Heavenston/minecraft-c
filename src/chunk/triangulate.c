@@ -13,6 +13,7 @@ void mcc_chunk_mesh_init(struct mcc_chunk_mesh *r_mesh) {
     r_mesh->normals = NULL;
     r_mesh->texcoords = NULL;
     r_mesh->texids = NULL;
+    r_mesh->faces = NULL;
 }
 
 void mcc_chunk_mesh_free(struct mcc_chunk_mesh *r_mesh) {
@@ -20,6 +21,7 @@ void mcc_chunk_mesh_free(struct mcc_chunk_mesh *r_mesh) {
     free(r_mesh->normals);
     free(r_mesh->texcoords);
     free(r_mesh->texids);
+    free(r_mesh->faces);
 
     r_mesh->vertex_count = 0;
     r_mesh->vertex_capacity = 0;
@@ -27,6 +29,7 @@ void mcc_chunk_mesh_free(struct mcc_chunk_mesh *r_mesh) {
     r_mesh->normals = NULL;
     r_mesh->texcoords = NULL;
     r_mesh->texids = NULL;
+    r_mesh->faces = NULL;
 }
 
 /**
@@ -45,6 +48,7 @@ static void add_vertices(struct mcc_chunk_mesh *r_mesh, size_t amount) {
         r_mesh->positions = realloc(r_mesh->positions, sizeof(*r_mesh->positions) * new_cap);
         r_mesh->texcoords = realloc(r_mesh->texcoords, sizeof(*r_mesh->texcoords) * new_cap);
         r_mesh->texids = realloc(r_mesh->texids, sizeof(*r_mesh->texids) * new_cap);
+        r_mesh->faces = realloc(r_mesh->faces, sizeof(*r_mesh->faces) * new_cap);
     }
 
     r_mesh->vertex_count += amount;
@@ -71,12 +75,13 @@ static inline void swap_winding(struct mcc_chunk_mesh *mesh, size_t start_idx) {
     mesh->texcoords[start_idx+1] = mesh->texcoords[start_idx+2];
     mesh->texcoords[start_idx+2] = temp_tex;
     
-    // Swap texids for first triangle if they exist
-    if (mesh->texids) {
-        uint8_t temp_texid = mesh->texids[start_idx+1];
-        mesh->texids[start_idx+1] = mesh->texids[start_idx+2];
-        mesh->texids[start_idx+2] = temp_texid;
-    }
+    uint8_t temp_texid = mesh->texids[start_idx+1];
+    mesh->texids[start_idx+1] = mesh->texids[start_idx+2];
+    mesh->texids[start_idx+2] = temp_texid;
+    
+    enum mcc_chunk_block_faces temp_face = mesh->faces[start_idx+1];
+    mesh->faces[start_idx+1] = mesh->faces[start_idx+2];
+    mesh->faces[start_idx+2] = temp_face;
     
     // Swap vertices for the second triangle (3,4,5)
     temp_pos = mesh->positions[start_idx+4];
@@ -87,12 +92,13 @@ static inline void swap_winding(struct mcc_chunk_mesh *mesh, size_t start_idx) {
     mesh->texcoords[start_idx+4] = mesh->texcoords[start_idx+3];
     mesh->texcoords[start_idx+3] = temp_tex;
     
-    // Swap texids for second triangle if they exist
-    if (mesh->texids) {
-        uint8_t temp_texid = mesh->texids[start_idx+4];
-        mesh->texids[start_idx+4] = mesh->texids[start_idx+3];
-        mesh->texids[start_idx+3] = temp_texid;
-    }
+    temp_texid = mesh->texids[start_idx+4];
+    mesh->texids[start_idx+4] = mesh->texids[start_idx+3];
+    mesh->texids[start_idx+3] = temp_texid;
+    
+    temp_face = mesh->faces[start_idx+4];
+    mesh->faces[start_idx+4] = mesh->faces[start_idx+3];
+    mesh->faces[start_idx+3] = temp_face;
 }
 
 static inline void append_face_x(struct face_mesh fm) {
@@ -173,15 +179,6 @@ static inline void append_face_y(struct face_mesh fm) {
     }
 }
 
-enum chunk_block_faces: uint8_t {
-    BLOCK_FACE_NX = 1 << 0,
-    BLOCK_FACE_PX = 1 << 1,
-    BLOCK_FACE_NY = 1 << 2,
-    BLOCK_FACE_PY = 1 << 3,
-    BLOCK_FACE_NZ = 1 << 4,
-    BLOCK_FACE_PZ = 1 << 5,
-};
-
 enum triangulation_axis: uint8_t {
     TRIANGULATION_AXIS_X = 0,
     TRIANGULATION_AXIS_Y = 1,
@@ -201,7 +198,7 @@ struct block_face_data {
      * Unique 'id' of the block face.
      */
     uint8_t index;
-    enum chunk_block_faces face;
+    enum mcc_chunk_block_faces face;
     enum triangulation_axis axis;
     bool is_negative;
     int8_t dx;
@@ -376,10 +373,11 @@ void mcc_chunk_mesh_create(struct mcc_chunk_mesh *r_mesh, struct mcc_chunk_data 
                     };
                     add_vertices(r_mesh, 6);
 
-                    for (size_t i = face_mesh.start_idx; i < face_mesh.start_idx+6; i++)
+                    for (size_t i = face_mesh.start_idx; i < face_mesh.start_idx+6; i++) {
                         r_mesh->normals[i] = (mcc_vec3f){{ (float)face->dx, (float)face->dy, (float)face->dz }};
-                    for (size_t i = face_mesh.start_idx; i < face_mesh.start_idx+6; i++)
                         r_mesh->texids[i] = r_chunk_data->blocks[block_idx];
+                        r_mesh->faces[i] = face->face;
+                    }
 
                     switch (face->axis) {
                     case TRIANGULATION_AXIS_X:

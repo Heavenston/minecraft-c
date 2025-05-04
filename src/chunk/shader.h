@@ -4,10 +4,16 @@
 #include "linalg/matrix.h"
 #include "cpu_rasterizer/cpu_rasterizer.h"
 
+struct mcc_chunk_render_data;
+
 struct mcc_chunk_render_object {
+    struct mcc_chunk_render_data *data;
     struct mcc_chunk_mesh *mesh;
     mcc_mat4f mvp;
 };
+
+struct mcc_chunk_render_data *mcc_chunk_render_data_load();
+void mcc_chunk_render_data_free(struct mcc_chunk_render_data *);
 
 void mcc_chunk_vertex_shader_fn(struct mcc_cpurast_vertex_shader_input *input);
 void mcc_chunk_fragment_shader_fn(struct mcc_cpurast_fragment_shader_input *input);

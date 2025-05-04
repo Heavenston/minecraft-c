@@ -54,6 +54,7 @@ int main() {
     
     // Render object to pass to shader
     struct mcc_chunk_render_object render_object = {
+        .data = mcc_chunk_render_data_load(),
         .mesh = &chunk_mesh,
         .mvp = mcc_mat4f_identity() // Initial MVP, will be updated each frame
     };
@@ -205,6 +206,8 @@ int main() {
     // Clean up
     mcc_chunk_mesh_free(&chunk_mesh);
     mcc_window_free(window);
+
+    mcc_chunk_render_data_free(render_object.data);
 
     printf("Bye!\n");
 
