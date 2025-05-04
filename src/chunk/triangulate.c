@@ -2,6 +2,7 @@
 #include "chunk/chunk.h"
 #include "defs.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
 
@@ -300,6 +301,7 @@ void mcc_chunk_mesh_create(struct mcc_chunk_mesh *r_mesh, struct mcc_chunk_data 
                     // Try to extend in the x direction with the condition
                     // that the block type is the same
                     while (
+                        face->axis != TRIANGULATION_AXIS_X &&
                         x + extent_x + 1 < MCC_CHUNK_WIDTH &&
                         meshing_faces->to_mesh_faces[(extended_idx = mcc_chunk_block_idx(x + extent_x + 1, y, z))] & face->face &&
                         r_chunk_data->blocks[extended_idx] == bt
@@ -307,6 +309,58 @@ void mcc_chunk_mesh_create(struct mcc_chunk_mesh *r_mesh, struct mcc_chunk_data 
                         // If we extend this face's mesh to it we do not need to mesh it
                         meshing_faces->to_mesh_faces[extended_idx] &= ~face->face;
                         extent_x++;
+                    }
+                    size_t extent_z = 0;
+                    while (
+                        face->axis != TRIANGULATION_AXIS_Z &&
+                        z + extent_z + 1 < MCC_CHUNK_WIDTH
+                    ) {
+                        for (size_t dx = 0; dx <= extent_x; dx++) {
+                            extended_idx = mcc_chunk_block_idx(x + dx, y, z + extent_z + 1);
+                            if (!(
+                                meshing_faces->to_mesh_faces[extended_idx] & face->face &&
+                                r_chunk_data->blocks[extended_idx] == bt
+                            )) {
+                                goto stop_extending_z;
+                            }
+                        }
+                        for (size_t dx = 0; dx <= extent_x; dx++) {
+                            extended_idx = mcc_chunk_block_idx(x + dx, y, z + extent_z + 1);
+                            meshing_faces->to_mesh_faces[extended_idx] &= ~face->face;
+                        }
+                        extent_z++;
+
+                        continue;
+                        stop_extending_z:
+                        break;
+                    }
+                    size_t extent_y = 0;
+                    while (
+                        face->axis != TRIANGULATION_AXIS_Y &&
+                        y + extent_y + 1 < MCC_CHUNK_HEIGHT
+                    ) {
+                        for (size_t dx = 0; dx <= extent_x; dx++) {
+                            for (size_t dz = 0; dz <= extent_z; dz++) {
+                                extended_idx = mcc_chunk_block_idx(x + dx, y + extent_y + 1, z + dz);
+                                if (!(
+                                    meshing_faces->to_mesh_faces[extended_idx] & face->face &&
+                                    r_chunk_data->blocks[extended_idx] == bt
+                                )) {
+                                    goto stop_extending_y;
+                                }
+                            }
+                        }
+                        for (size_t dx = 0; dx <= extent_x; dx++) {
+                            for (size_t dz = 0; dz <= extent_z; dz++) {
+                                extended_idx = mcc_chunk_block_idx(x + dx, y + extent_y + 1, z + dz);
+                                meshing_faces->to_mesh_faces[extended_idx] &= ~face->face;
+                            }
+                        }
+                        extent_y++;
+
+                        continue;
+                        stop_extending_y:
+                        break;
                     }
 
                     struct face_mesh face_mesh = {
@@ -316,8 +370,8 @@ void mcc_chunk_mesh_create(struct mcc_chunk_mesh *r_mesh, struct mcc_chunk_data 
                         .y = (float)y + (face->dy == 0 ? 0.f : face->dy < 0 ? 0.f : 1.f),
                         .z = (float)z + (face->dz == 0 ? 0.f : face->dz < 0 ? 0.f : 1.f),
                         .extent_x = (float)(extent_x + 1),
-                        .extent_y = 1.f,
-                        .extent_z = 1.f,
+                        .extent_y = (float)(extent_y + 1),
+                        .extent_z = (float)(extent_z + 1),
                         .clockwise = !face->is_negative,
                     };
                     add_vertices(r_mesh, 6);
