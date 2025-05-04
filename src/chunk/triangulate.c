@@ -105,15 +105,15 @@ static inline void append_face_x(struct face_mesh fm) {
     mesh->positions[si+0] = (mcc_vec3f){{ x, y+0.f, z+0.f }};
     mesh->texcoords[si+0] = (mcc_vec2f){{ 0.f, 0.f }};
     mesh->positions[si+1] = (mcc_vec3f){{ x, y+0.f, z+fm.extent_z }};
-    mesh->texcoords[si+1] = (mcc_vec2f){{ 1.f, 0.f }};
+    mesh->texcoords[si+1] = (mcc_vec2f){{ fm.extent_z, 0.f }};
     mesh->positions[si+2] = (mcc_vec3f){{ x, y+fm.extent_y, z+0.f }};
-    mesh->texcoords[si+2] = (mcc_vec2f){{ 0.f, 1.f }};
+    mesh->texcoords[si+2] = (mcc_vec2f){{ 0.f, fm.extent_y }};
     mesh->positions[si+3] = (mcc_vec3f){{ x, y+fm.extent_y, z+0.f }};
-    mesh->texcoords[si+3] = (mcc_vec2f){{ 0.f, 1.f }};
+    mesh->texcoords[si+3] = (mcc_vec2f){{ 0.f, fm.extent_y }};
     mesh->positions[si+4] = (mcc_vec3f){{ x, y+0.f, z+fm.extent_z }};
-    mesh->texcoords[si+4] = (mcc_vec2f){{ 1.f, 0.f }};
+    mesh->texcoords[si+4] = (mcc_vec2f){{ fm.extent_z, 0.f }};
     mesh->positions[si+5] = (mcc_vec3f){{ x, y+fm.extent_y, z+fm.extent_z }};
-    mesh->texcoords[si+5] = (mcc_vec2f){{ 1.f, 1.f }};
+    mesh->texcoords[si+5] = (mcc_vec2f){{ fm.extent_z, fm.extent_y }};
 
     // If clockwise is requested, swap vertices to reverse winding order
     if (fm.clockwise) {
@@ -131,15 +131,15 @@ static inline void append_face_z(struct face_mesh fm) {
     mesh->positions[si+0] = (mcc_vec3f){{ x+0.f, y+0.f, z }};
     mesh->texcoords[si+0] = (mcc_vec2f){{ 0.f, 0.f }};
     mesh->positions[si+1] = (mcc_vec3f){{ x+fm.extent_x, y+0.f, z }};
-    mesh->texcoords[si+1] = (mcc_vec2f){{ 1.f, 0.f }};
+    mesh->texcoords[si+1] = (mcc_vec2f){{ fm.extent_x, 0.f }};
     mesh->positions[si+2] = (mcc_vec3f){{ x+0.f, y+fm.extent_y, z }};
-    mesh->texcoords[si+2] = (mcc_vec2f){{ 0.f, 1.f }};
+    mesh->texcoords[si+2] = (mcc_vec2f){{ 0.f, fm.extent_y }};
     mesh->positions[si+3] = (mcc_vec3f){{ x+0.f, y+fm.extent_y, z }};
-    mesh->texcoords[si+3] = (mcc_vec2f){{ 0.f, 1.f }};
+    mesh->texcoords[si+3] = (mcc_vec2f){{ 0.f, fm.extent_y }};
     mesh->positions[si+4] = (mcc_vec3f){{ x+fm.extent_x, y+0.f, z }};
-    mesh->texcoords[si+4] = (mcc_vec2f){{ 1.f, 0.f }};
+    mesh->texcoords[si+4] = (mcc_vec2f){{ fm.extent_x, 0.f }};
     mesh->positions[si+5] = (mcc_vec3f){{ x+fm.extent_x, y+fm.extent_y, z }};
-    mesh->texcoords[si+5] = (mcc_vec2f){{ 1.f, 1.f }};
+    mesh->texcoords[si+5] = (mcc_vec2f){{ fm.extent_x, fm.extent_y }};
 
     // If clockwise is requested, swap vertices to reverse winding order
     if (!fm.clockwise) {
@@ -157,15 +157,15 @@ static inline void append_face_y(struct face_mesh fm) {
     mesh->positions[si+0] = (mcc_vec3f){{ x+0.f, y, z+0.f }};
     mesh->texcoords[si+0] = (mcc_vec2f){{ 0.f, 0.f }};
     mesh->positions[si+1] = (mcc_vec3f){{ x+fm.extent_x, y, z+0.f }};
-    mesh->texcoords[si+1] = (mcc_vec2f){{ 1.f, 0.f }};
+    mesh->texcoords[si+1] = (mcc_vec2f){{ fm.extent_x, 0.f }};
     mesh->positions[si+2] = (mcc_vec3f){{ x+0.f, y, z+fm.extent_z }};
-    mesh->texcoords[si+2] = (mcc_vec2f){{ 0.f, 1.f }};
+    mesh->texcoords[si+2] = (mcc_vec2f){{ 0.f, fm.extent_z }};
     mesh->positions[si+3] = (mcc_vec3f){{ x+0.f, y, z+fm.extent_z }};
-    mesh->texcoords[si+3] = (mcc_vec2f){{ 0.f, 1.f }};
+    mesh->texcoords[si+3] = (mcc_vec2f){{ 0.f, fm.extent_z }};
     mesh->positions[si+4] = (mcc_vec3f){{ x+fm.extent_x, y, z+0.f }};
-    mesh->texcoords[si+4] = (mcc_vec2f){{ 1.f, 0.f }};
+    mesh->texcoords[si+4] = (mcc_vec2f){{ fm.extent_x, 0.f }};
     mesh->positions[si+5] = (mcc_vec3f){{ x+fm.extent_x, y, z+fm.extent_z }};
-    mesh->texcoords[si+5] = (mcc_vec2f){{ 1.f, 1.f }};
+    mesh->texcoords[si+5] = (mcc_vec2f){{ fm.extent_x, fm.extent_z }};
     
     // If clockwise is requested, swap vertices to reverse winding order
     if (fm.clockwise) {
