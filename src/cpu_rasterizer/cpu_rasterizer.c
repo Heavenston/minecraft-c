@@ -103,54 +103,41 @@ struct mcc_barycentric_coords {
  */
 static struct mcc_barycentric_coords mcc_calculate_barycentric(mcc_vec2f v0, mcc_vec2f v1, mcc_vec2f v2, mcc_vec2f screenPos) {
     struct mcc_barycentric_coords result = {};
-    // Calculate edge vectors and vector from v0 to the point
-    mcc_vec2f v0v1 = mcc_vec2f_sub(v1, v0); // Vector A in P - v0 = u*A + v*B
-    mcc_vec2f v0v2 = mcc_vec2f_sub(v2, v0); // Vector B
-    mcc_vec2f v0p  = mcc_vec2f_sub(screenPos, v0); // Vector C
 
-    // Calculate dot products needed for the system of equations:
-    // dot(C, A) = u * dot(A, A) + v * dot(B, A)
-    // dot(C, B) = u * dot(A, B) + v * dot(B, B)
-    float dot00 = mcc_vec2f_dot(v0v1, v0v1); // dot(A, A)
-    float dot01 = mcc_vec2f_dot(v0v1, v0v2); // dot(A, B) == dot(B, A)
-    float dot11 = mcc_vec2f_dot(v0v2, v0v2); // dot(B, B)
-    float dot20 = mcc_vec2f_dot(v0p,  v0v1); // dot(C, A)
-    float dot21 = mcc_vec2f_dot(v0p,  v0v2); // dot(C, B)
-
-    // Calculate denominator for Cramer's rule or matrix inversion
-    // Denom = dot(A, A) * dot(B, B) - dot(A, B) * dot(B, A)
-    float denom = dot00 * dot11 - dot01 * dot01;
-
-    // Check if the triangle is degenerate (collinear vertices)
-    // Use a small epsilon for floating-point comparison
-    float epsilon = 1e-7f;
-    if (denom < epsilon && denom > -epsilon) {
-        // Triangle is degenerate, cannot reliably calculate coordinates.
-        // Return default values (outside).
+    // Compute vectors        
+    mcc_vec2f v0v1 = mcc_vec2f_sub(v1, v0);
+    mcc_vec2f v0v2 = mcc_vec2f_sub(v2, v0);
+    mcc_vec2f v0p = mcc_vec2f_sub(screenPos, v0);
+    
+    // Compute area of the triangle using cross product
+    float area = v0v1.x * v0v2.y - v0v1.y * v0v2.x;
+    if (fabsf(area) < 1e-7f) {
+        // Triangle is degenerate, cannot calculate barycentric coordinates reliably
         return result;
     }
-
-    // Calculate u and v using Cramer's rule (or by solving the 2x2 system)
-    // u = (dot(B, B) * dot(C, A) - dot(A, B) * dot(C, B)) / Denom
-    // v = (dot(A, A) * dot(C, B) - dot(A, B) * dot(C, A)) / Denom
-    float invDenom = 1.f / denom;
-    result.u = (dot11 * dot20 - dot01 * dot21) * invDenom;
-    result.v = (dot00 * dot21 - dot01 * dot20) * invDenom;
-
-    // Calculate w using the property that coordinates sum to 1
-    result.w = 1.f - result.u - result.v;
-
+    
+    // Compute barycentric coordinates directly using vector cross products
+    float invArea = 1.0f / area;
+    
+    // The u coordinate (weight for v1)
+    float crossPV2 = v0p.x * v0v2.y - v0p.y * v0v2.x;
+    result.u = crossPV2 * invArea;
+    
+    // The v coordinate (weight for v2)
+    float crossV1P = v0v1.x * v0p.y - v0v1.y * v0p.x;
+    result.v = crossV1P * invArea;
+    
+    // The w coordinate (weight for v0)
+    result.w = 1.0f - result.u - result.v;
+    
     // Check if the point is inside the triangle (including boundaries)
-    // All coordinates must be non-negative.
-    // Due to floating point inaccuracies, allow a small tolerance (epsilon).
+    float epsilon = 1e-7f;
     if (result.u >= -epsilon && result.v >= -epsilon && result.w >= -epsilon) {
-    // Alternatively: if (result.u >= -epsilon && result.v >= -epsilon && (result.u + result.v) <= 1.f + epsilon) {
         result.isInside = true;
     } else {
-        result.isInside = false; // Explicitly set to false if outside
+        result.isInside = false;
     }
-
-
+    
     return result;
 }
 
@@ -303,12 +290,30 @@ static void process_fragment(const struct mcc_rasterization_context *r_context, 
     const struct processed_vertex *vertices = r_context->r_vertices;
     const struct mcc_barycentric_coords *barycentric = &pixel->barycentric;
     
-    // Interpolate varying attributes using barycentric coordinates
+    // Interpolation of varying attributes
     for (size_t varying_i = 0; varying_i < r_context->varying_count; varying_i++) {
-        auto varv1 = mcc_vec4f_scale(vertices[1].varyings[varying_i].vec4f, barycentric->u);
-        auto varv2 = mcc_vec4f_scale(vertices[2].varyings[varying_i].vec4f, barycentric->v);
-        auto varv0 = mcc_vec4f_scale(vertices[0].varyings[varying_i].vec4f, barycentric->w);
-        r_context->r_fragment_varyings[varying_i].vec4f = mcc_vec4f_add(varv0, mcc_vec4f_add(varv1, varv2));
+        // Get the w-coordinate from each vertex (reciprocal of the homogeneous 4th component)
+        float w0 = 1.0f / vertices[0].pos4.w;
+        float w1 = 1.0f / vertices[1].pos4.w;
+        float w2 = 1.0f / vertices[2].pos4.w;
+        
+        float w_interpolated = barycentric->w * w0 + barycentric->u * w1 + barycentric->v * w2;
+        float correction = 1.0f / w_interpolated;
+        
+        mcc_vec4f var0 = vertices[0].varyings[varying_i].vec4f;
+        mcc_vec4f var1 = vertices[1].varyings[varying_i].vec4f;
+        mcc_vec4f var2 = vertices[2].varyings[varying_i].vec4f;
+        
+        mcc_vec4f result;
+        for (int i = 0; i < 4; i++) {
+            result.components[i] = correction * (
+                barycentric->w * var0.components[i] * w0 +
+                barycentric->u * var1.components[i] * w1 +
+                barycentric->v * var2.components[i] * w2
+            );
+        }
+        
+        r_context->r_fragment_varyings[varying_i].vec4f = result;
     }
 
     // Execute the fragment shader
