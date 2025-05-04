@@ -358,7 +358,7 @@ void mcc_cpurast_render(const struct mcc_cpurast_render_config *r_config) {
     };
 
     uint32_t vertex_idx = 0;
-    size_t vertex_index_increment;
+    uint32_t vertex_index_increment;
 
     // If we are in triangle strip, the first two vertices must be processed before
     // for the next primitives, the first two vertices will be the ones from the
@@ -379,6 +379,10 @@ void mcc_cpurast_render(const struct mcc_cpurast_render_config *r_config) {
             pv->pos3 = mcc_vec3f_scale(pv->pos4.xyz, 1.f / pv->pos4.w);
         }
         break;
+    default:
+        // NOTE: Silence 'vertex_index_increment' may be uninitialized warning.
+        vertex_index_increment = 3;
+        abort();
     }
 
     for (; vertex_idx < r_config->vertex_count; vertex_idx += vertex_index_increment) {

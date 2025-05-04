@@ -37,6 +37,7 @@ inline static bool mcc_block_is_transparent(enum mcc_block_type bt) {
     case MCC_BLOCK_TYPE_LEAVES:
         return false;
     }
+    return false;
 }
 
 inline static size_t mcc_chunk_block_idx(size_t x, size_t y, size_t z) {
