@@ -171,190 +171,160 @@ static inline void append_face_y(struct face_mesh fm) {
     }
 }
 
+enum chunk_block_faces: uint8_t {
+    BLOCK_FACE_NX = 1 << 0,
+    BLOCK_FACE_PX = 1 << 1,
+    BLOCK_FACE_NY = 1 << 2,
+    BLOCK_FACE_PY = 1 << 3,
+    BLOCK_FACE_NZ = 1 << 4,
+    BLOCK_FACE_PZ = 1 << 5,
+};
+
+enum triangulation_axis: uint8_t {
+    TRIANGULATION_AXIS_X = 0,
+    TRIANGULATION_AXIS_Y = 1,
+    TRIANGULATION_AXIS_Z = 2,
+};
+
+struct chunk_meshing_faces {
+    uint8_t to_mesh_faces[MCC_CHUNK_WIDTH*MCC_CHUNK_WIDTH*MCC_CHUNK_HEIGHT];
+};
+
 struct chunk_block_meshing {
     struct mcc_chunk_mesh *r_mesh;
     struct mcc_chunk_data *r_chunk_data;
+    struct chunk_meshing_faces *r_meshing_faces;
     enum mcc_block_type block_type;
     size_t x, y, z;
 };
 
-/**
- * Generate the face for the negative x face of the given block
- */
-static inline void generate_block_face_nx(struct chunk_block_meshing m) {
-    // TODO: Have some way to get neigbor chunk to check its data
-    enum mcc_block_type neighbor =
-        m.x == 0
-            ? MCC_BLOCK_TYPE_AIR
-            : m.r_chunk_data->blocks[mcc_chunk_block_idx(m.x - 1, m.y, m.z)];
+struct block_face_data {
+    /**
+     * Unique 'id' of the block face.
+     */
+    uint8_t index;
+    enum chunk_block_faces face;
+    enum triangulation_axis axis;
+    bool is_negative;
+    int8_t dx;
+    int8_t dy;
+    int8_t dz;
+};
 
-    if (!mcc_block_is_transparent(neighbor))
-        return;
+const struct block_face_data block_faces[6] = {
+    {
+        .index = 0, .face = BLOCK_FACE_NX,
+        .axis = TRIANGULATION_AXIS_X,
+        .is_negative = true,
+        .dx =-1, .dy = 0, .dz = 0,
+    },
+    {
+        .index = 1, .face = BLOCK_FACE_PX,
+        .axis = TRIANGULATION_AXIS_X,
+        .is_negative = false,
+        .dx =+1, .dy = 0, .dz = 0,
+    },
+    {
+        .index = 0, .face = BLOCK_FACE_NY,
+        .axis = TRIANGULATION_AXIS_Y,
+        .is_negative = true,
+        .dx = 0, .dy =-1, .dz = 0,
+    },
+    {
+        .index = 1, .face = BLOCK_FACE_PY,
+        .axis = TRIANGULATION_AXIS_Y,
+        .is_negative = false,
+        .dx = 0, .dy =+1, .dz = 0,
+    },
+    {
+        .index = 0, .face = BLOCK_FACE_NZ,
+        .axis = TRIANGULATION_AXIS_Z,
+        .is_negative = true,
+        .dx = 0, .dy = 0, .dz =-1,
+    },
+    {
+        .index = 1, .face = BLOCK_FACE_PZ,
+        .axis = TRIANGULATION_AXIS_Z,
+        .is_negative = false,
+        .dx = 0, .dy = 0, .dz =+1,
+    },
+};
 
-    size_t vi = m.r_mesh->vertex_count;
-    add_vertices(m.r_mesh, 6);
-    for (size_t i = vi; i < vi+6; i++)
-        m.r_mesh->normals[i] = (mcc_vec3f){{ -1.f, 0.f, 0.f }};
-    for (size_t i = vi; i < vi+6; i++)
-        m.r_mesh->texids[i] = m.block_type;
-
-    append_face_x((struct face_mesh) {
-        .r_mesh = m.r_mesh,
-        .start_idx = vi,
-        .x = (float)m.x, .y = (float)m.y, .z = (float)m.z,
-        .clockwise = false,  // Changed to counter-clockwise for -X face when using CW culling
-    });
-}
-
-static inline void generate_block_face_px(struct chunk_block_meshing m) {
-    // TODO: Have some way to get neigbor chunk to check its data
-    enum mcc_block_type neighbor =
-        m.x+1 >= MCC_CHUNK_WIDTH
-            ? MCC_BLOCK_TYPE_AIR
-            : m.r_chunk_data->blocks[mcc_chunk_block_idx(m.x + 1, m.y, m.z)];
-
-    if (!mcc_block_is_transparent(neighbor))
-        return;
-
-    size_t vi = m.r_mesh->vertex_count;
-    add_vertices(m.r_mesh, 6);
-    for (size_t i = vi; i < vi+6; i++)
-        m.r_mesh->normals[i] = (mcc_vec3f){{ 1.f, 0.f, 0.f }};
-    for (size_t i = vi; i < vi+6; i++)
-        m.r_mesh->texids[i] = m.block_type;
-
-    append_face_x((struct face_mesh) {
-        .r_mesh = m.r_mesh,
-        .start_idx = vi,
-        .x = (float)m.x + 1.f, .y = (float)m.y, .z = (float)m.z,
-        .clockwise = true,  // Changed to clockwise for +X face when using CW culling
-    });
-}
-
-static inline void generate_block_face_nz(struct chunk_block_meshing m) {
-    // TODO: Have some way to get neighbor chunk to check its data
-    enum mcc_block_type neighbor =
-        m.z == 0
-            ? MCC_BLOCK_TYPE_AIR
-            : m.r_chunk_data->blocks[mcc_chunk_block_idx(m.x, m.y, m.z - 1)];
-
-    if (!mcc_block_is_transparent(neighbor))
-        return;
-
-    size_t vi = m.r_mesh->vertex_count;
-    add_vertices(m.r_mesh, 6);
-    for (size_t i = vi; i < vi+6; i++)
-        m.r_mesh->normals[i] = (mcc_vec3f){{ 0.f, 0.f, -1.f }};
-    for (size_t i = vi; i < vi+6; i++)
-        m.r_mesh->texids[i] = m.block_type;
-
-    append_face_z((struct face_mesh) {
-        .r_mesh = m.r_mesh,
-        .start_idx = vi,
-        .x = (float)m.x, .y = (float)m.y, .z = (float)m.z,
-        .clockwise = false,  // Changed to counter-clockwise for -Z face when using CW culling
-    });
-}
-
-static inline void generate_block_face_pz(struct chunk_block_meshing m) {
-    // TODO: Have some way to get neighbor chunk to check its data
-    enum mcc_block_type neighbor =
-        m.z+1 >= MCC_CHUNK_WIDTH
-            ? MCC_BLOCK_TYPE_AIR
-            : m.r_chunk_data->blocks[mcc_chunk_block_idx(m.x, m.y, m.z + 1)];
-
-    if (!mcc_block_is_transparent(neighbor))
-        return;
-
-    size_t vi = m.r_mesh->vertex_count;
-    add_vertices(m.r_mesh, 6);
-    for (size_t i = vi; i < vi+6; i++)
-        m.r_mesh->normals[i] = (mcc_vec3f){{ 0.f, 0.f, 1.f }};
-    for (size_t i = vi; i < vi+6; i++)
-        m.r_mesh->texids[i] = m.block_type;
-
-    append_face_z((struct face_mesh) {
-        .r_mesh = m.r_mesh,
-        .start_idx = vi,
-        .x = (float)m.x, .y = (float)m.y, .z = (float)m.z + 1.f,
-        .clockwise = true,  // Changed to clockwise for +Z face when using CW culling
-    });
-}
-
-static inline void generate_block_face_ny(struct chunk_block_meshing m) {
-    // TODO: Have some way to get neighbor chunk to check its data
-    enum mcc_block_type neighbor =
-        m.y == 0
-            ? MCC_BLOCK_TYPE_AIR
-            : m.r_chunk_data->blocks[mcc_chunk_block_idx(m.x, m.y - 1, m.z)];
-
-    if (!mcc_block_is_transparent(neighbor))
-        return;
-
-    size_t vi = m.r_mesh->vertex_count;
-    add_vertices(m.r_mesh, 6);
-    for (size_t i = vi; i < vi+6; i++)
-        m.r_mesh->normals[i] = (mcc_vec3f){{ 0.f, -1.f, 0.f }};
-    for (size_t i = vi; i < vi+6; i++)
-        m.r_mesh->texids[i] = m.block_type;
-
-    append_face_y((struct face_mesh) {
-        .r_mesh = m.r_mesh,
-        .start_idx = vi,
-        .x = (float)m.x, .y = (float)m.y, .z = (float)m.z,
-        .clockwise = false,  // Changed to counter-clockwise for -Y face when using CW culling
-    });
-}
-
-static inline void generate_block_face_py(struct chunk_block_meshing m) {
-    // TODO: Have some way to get neighbor chunk to check its data
-    enum mcc_block_type neighbor =
-        m.y+1 >= MCC_CHUNK_HEIGHT
-            ? MCC_BLOCK_TYPE_AIR
-            : m.r_chunk_data->blocks[mcc_chunk_block_idx(m.x, m.y + 1, m.z)];
-
-    if (!mcc_block_is_transparent(neighbor))
-        return;
-
-    size_t vi = m.r_mesh->vertex_count;
-    add_vertices(m.r_mesh, 6);
-    for (size_t i = vi; i < vi+6; i++)
-        m.r_mesh->normals[i] = (mcc_vec3f){{ 0.f, 1.f, 0.f }};
-    for (size_t i = vi; i < vi+6; i++)
-        m.r_mesh->texids[i] = m.block_type;
-
-    append_face_y((struct face_mesh) {
-        .r_mesh = m.r_mesh,
-        .start_idx = vi,
-        .x = (float)m.x, .y = (float)m.y + 1.f, .z = (float)m.z,
-        .clockwise = true,  // Changed to clockwise for +Y face when using CW culling
-    });
+size_t size_t_signed_add(size_t val, ssize_t diff) {
+    return diff < 0 ? val - (size_t)(-diff) : val + (size_t)diff;
 }
 
 void mcc_chunk_mesh_create(struct mcc_chunk_mesh *r_mesh, struct mcc_chunk_data *r_chunk_data) {
+    struct chunk_meshing_faces *meshing_faces = calloc(1, sizeof(*meshing_faces));
+
     for (size_t y = 0; y < MCC_CHUNK_HEIGHT; y++) {
         for (size_t z = 0; z < MCC_CHUNK_WIDTH; z++) {
             for (size_t x = 0; x < MCC_CHUNK_WIDTH; x++) {
-                enum mcc_block_type bt = r_chunk_data->blocks[mcc_chunk_block_idx(x, y, z)];
+                size_t block_idx = mcc_chunk_block_idx(x, y, z);
+                enum mcc_block_type bt = r_chunk_data->blocks[block_idx];
                 if (bt == MCC_BLOCK_TYPE_AIR)
                     continue;
 
-                struct chunk_block_meshing m = {
-                    .r_chunk_data = r_chunk_data,
-                    .r_mesh = r_mesh,
-                    .block_type = bt,
-                    .x = x,
-                    .y = y,
-                    .z = z,
-                };
-
-                generate_block_face_nx(m);
-                generate_block_face_px(m);
-                generate_block_face_nz(m);
-                generate_block_face_pz(m);
-                generate_block_face_ny(m);
-                generate_block_face_py(m);
+                for (size_t fi = 0; fi < 6; fi++) {
+                    auto face = &block_faces[fi];
+                    ssize_t neighbor_x = (ssize_t)x + face->dx;
+                    ssize_t neighbor_y = (ssize_t)y + face->dy;
+                    ssize_t neighbor_z = (ssize_t)z + face->dz;
+                    enum mcc_block_type neighbor_bt =
+                        neighbor_x >= 0 && neighbor_x < MCC_CHUNK_WIDTH &&
+                        neighbor_y >= 0 && neighbor_y < MCC_CHUNK_HEIGHT &&
+                        neighbor_z >= 0 && neighbor_z < MCC_CHUNK_WIDTH
+                        ? r_chunk_data->blocks[mcc_chunk_block_idx((size_t)neighbor_x, (size_t)neighbor_y, (size_t)neighbor_z)]
+                        : MCC_BLOCK_TYPE_AIR;
+                    if (mcc_block_is_transparent(neighbor_bt))
+                        meshing_faces->to_mesh_faces[block_idx] |= face->face;
+                }
             }
         }
     }
+
+    for (size_t y = 0; y < MCC_CHUNK_HEIGHT; y++) {
+        for (size_t z = 0; z < MCC_CHUNK_WIDTH; z++) {
+            for (size_t x = 0; x < MCC_CHUNK_WIDTH; x++) {
+                size_t block_idx = mcc_chunk_block_idx(x, y, z);
+
+                for (size_t fi = 0; fi < 6; fi++) {
+                    auto face = &block_faces[fi];
+                    
+                    if (!(meshing_faces->to_mesh_faces[block_idx] & face->face)) {
+                        continue;
+                    }
+
+                    struct face_mesh face_mesh = {
+                        .r_mesh = r_mesh,
+                        .start_idx = r_mesh->vertex_count,
+                        .x = (float)x + (face->dx == 0 ? 0.f : face->dx < 0 ? 0.f : 1.f),
+                        .y = (float)y + (face->dy == 0 ? 0.f : face->dy < 0 ? 0.f : 1.f),
+                        .z = (float)z + (face->dz == 0 ? 0.f : face->dz < 0 ? 0.f : 1.f),
+                        .clockwise = !face->is_negative,
+                    };
+                    add_vertices(r_mesh, 6);
+
+                    for (size_t i = face_mesh.start_idx; i < face_mesh.start_idx+6; i++)
+                        r_mesh->normals[i] = (mcc_vec3f){{ (float)face->dx, (float)face->dy, (float)face->dz }};
+                    for (size_t i = face_mesh.start_idx; i < face_mesh.start_idx+6; i++)
+                        r_mesh->texids[i] = r_chunk_data->blocks[block_idx];
+
+                    switch (face->axis) {
+                    case TRIANGULATION_AXIS_X:
+                        append_face_x(face_mesh);
+                        break;
+                    case TRIANGULATION_AXIS_Y:
+                        append_face_y(face_mesh);
+                        break;
+                    case TRIANGULATION_AXIS_Z:
+                        append_face_z(face_mesh);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    free(meshing_faces);
 }
