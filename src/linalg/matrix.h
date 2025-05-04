@@ -193,80 +193,68 @@ static inline mcc_vec4f mcc_mat4f_mul_vec4f(mcc_mat4f mat, mcc_vec4f vec) {
     };
 }
 
-static inline mcc_mat4f mcc_mat4f_inverse(mcc_mat4f mat) {
-    mcc_vec4f c0 = {{ mat.r1.x, mat.r2.x, mat.r3.x, mat.r4.x }};
-    mcc_vec4f c1 = {{ mat.r1.y, mat.r2.y, mat.r3.y, mat.r4.y }};
-    mcc_vec4f c2 = {{ mat.r1.z, mat.r2.z, mat.r3.z, mat.r4.z }};
-    mcc_vec4f c3 = {{ mat.r1.w, mat.r2.w, mat.r3.w, mat.r4.w }};
+static inline mcc_mat4f mcc_mat4f_inverse(mcc_mat4f m) {
+    float aug[4][8];
+    int i, j, k;
 
-    mcc_vec3f a0 = {{ c2.y, c2.z, c2.w }};
-    mcc_vec3f a1 = {{ c3.y, c3.z, c3.w }};
-    mcc_vec3f a2 = {{ c1.y, c1.z, c1.w }};
-    mcc_vec3f a3 = {{ c3.y, c3.z, c3.w }};
-    mcc_vec3f a4 = {{ c1.y, c1.z, c1.w }};
-    mcc_vec3f a5 = {{ c2.y, c2.z, c2.w }};
+    /* Build augmented matrix [m | I] */
+    for (i = 0; i < 4; i++) {
+        for (j = 0; j < 4; j++) {
+            aug[i][j]     = m.comps[i][j];
+            aug[i][j + 4] = (i == j) ? 1.0f : 0.0f;
+        }
+    }
 
-    mcc_vec3f c20_c31 = mcc_vec3f_cross(a0, a1);
-    mcc_vec3f c10_c32 = mcc_vec3f_cross(a2, a3);
-    mcc_vec3f c10_c21 = mcc_vec3f_cross(a4, a5);
+    /* Forward elimination */
+    for (i = 0; i < 4; i++) {
+        /* Find pivot row */
+        int   pivot = i;
+        float max   = fabsf(aug[i][i]);
+        for (k = i + 1; k < 4; k++) {
+            float v = fabsf(aug[k][i]);
+            if (v > max) {
+                max   = v;
+                pivot = k;
+            }
+        }
+        /* Singular? return identity */
+        if (max < 1e-6f) {
+            return (mcc_mat4f){ .comps = {
+                {1,0,0,0},
+                {0,1,0,0},
+                {0,0,1,0},
+                {0,0,0,1}
+            }};
+        }
+        /* Swap rows if needed */
+        if (pivot != i) {
+            for (j = 0; j < 8; j++) {
+                float tmp     = aug[i][j];
+                aug[i][j]     = aug[pivot][j];
+                aug[pivot][j] = tmp;
+            }
+        }
+        /* Normalize pivot row */
+        float diag = aug[i][i];
+        for (j = 0; j < 8; j++) {
+            aug[i][j] /= diag;
+        }
+        /* Eliminate other rows */
+        for (k = 0; k < 4; k++) {
+            if (k == i) continue;
+            float factor = aug[k][i];
+            for (j = 0; j < 8; j++) {
+                aug[k][j] -= factor * aug[i][j];
+            }
+        }
+    }
 
-    mcc_vec3f b0 = {{ c2.x, c2.z, c2.w }};
-    mcc_vec3f b1 = {{ c3.x, c3.z, c3.w }};
-    mcc_vec3f b2 = {{ c1.x, c1.z, c1.w }};
-    mcc_vec3f b3 = {{ c3.x, c3.z, c3.w }};
-    mcc_vec3f b4 = {{ c1.x, c1.z, c1.w }};
-    mcc_vec3f b5 = {{ c2.x, c2.z, c2.w }};
-
-    mcc_vec3f c20_c30 = mcc_vec3f_cross(b0, b1);
-    mcc_vec3f c10_c30 = mcc_vec3f_cross(b2, b3);
-    mcc_vec3f c10_c20 = mcc_vec3f_cross(b4, b5);
-
-    float d01 = c1.x * c3.w - c1.w * c3.x;
-    float d04 = c1.y * c3.z - c1.z * c3.y;
-    float d05 = c1.y * c3.w - c1.w * c3.y;
-
-    float d11 = c0.x * c3.w - c0.w * c3.x;
-    float d14 = c0.y * c3.z - c0.z * c3.y;
-    float d15 = c0.y * c3.w - c0.w * c3.y;
-
-    float d21 = c0.x * c2.w - c0.w * c2.x;
-    float d24 = c0.y * c2.z - c0.z * c2.y;
-    float d25 = c0.y * c2.w - c0.w * c2.y;
-
-    float d31 = c0.x * c1.w - c0.w * c1.x;
-    float d34 = c0.y * c1.z - c0.z * c1.y;
-    float d35 = c0.y * c1.w - c0.w * c1.y;
-
-    mcc_vec4f v0, v1, v2, v3;
-
-    v0.x =  c20_c31.z;
-    v0.y = -c10_c32.z;
-    v0.z =  c10_c21.z;
-    v0.w = -(c2.x * d05 - c2.y * d01 + c2.w * d04);
-
-    v1.x = -c20_c30.z;
-    v1.y =  c10_c30.z;
-    v1.z = -c10_c20.z;
-    v1.w =  (c3.x * d25 - c3.y * d21 + c3.w * d24);
-
-    v2.x =  c20_c30.y;
-    v2.y = -c10_c30.y;
-    v2.z =  c10_c20.y;
-    v2.w = -(c3.x * d15 - c3.y * d11 + c3.w * d14);
-
-    v3.x = -c20_c30.x;
-    v3.y =  c10_c30.x;
-    v3.z = -c10_c20.x;
-    v3.w =  (c2.x * d35 - c2.y * d31 + c2.w * d34);
-
-    float det = c0.x * v0.x + c0.y * v1.x + c0.z * v2.x + c0.w * v3.x;
-    float inv_det = 1.0f / det;
-
-    mcc_mat4f result;
-    result.r1 = mcc_vec4f_scale(v0, inv_det);
-    result.r2 = mcc_vec4f_scale(v1, inv_det);
-    result.r3 = mcc_vec4f_scale(v2, inv_det);
-    result.r4 = mcc_vec4f_scale(v3, inv_det);
-
-    return result;
+    /* Extract inverse from augmented matrix */
+    mcc_mat4f inv;
+    for (i = 0; i < 4; i++) {
+        for (j = 0; j < 4; j++) {
+            inv.comps[i][j] = aug[i][j + 4];
+        }
+    }
+    return inv;
 }

@@ -89,8 +89,10 @@ struct mcc_chunk_render_data *mcc_chunk_render_data_load() {
 }
 
 mcc_vec4f sample(mcc_image_t *image, mcc_vec2f texcoords) {
-    size_t x = (size_t)((float)image->width * fmodf(texcoords.x, 1.f));
-    size_t y = (size_t)((float)image->height * (1.f - fmodf(texcoords.y, 1.f)));
+    size_t x = (size_t)((float)image->width * fmodf(texcoords.x, 1.f)) % image->width;
+    size_t y = (size_t)((float)image->height * (1.f - fmodf(texcoords.y, 1.f))) % image->height;
+    assert(x < image->width);
+    assert(y < image->height);
     size_t idx = x + y * image->width;
     uint8_t b = image->data[idx*4+0];
     uint8_t g = image->data[idx*4+1];
@@ -238,7 +240,7 @@ void mcc_chunk_render_config(
     mcc_chunk_fragment_shader(fs);
     out_config->r_fragment_shader = fs;
     
-    out_config->culling_mode = MCC_CPURAST_CULLING_MODE_CCW;
+    out_config->culling_mode = MCC_CPURAST_CULLING_MODE_CW;
     out_config->o_depth_comparison_fn = mcc_depth_comparison_fn_lt;
     out_config->polygon_mode = MCC_CPURAST_POLYGON_MODE_FILL;
     

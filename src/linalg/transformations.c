@@ -35,6 +35,15 @@ mcc_mat4f mcc_mat4f_rotate_z(float theta) {
     }};
 }
 
+mcc_mat4f mcc_mat4f_translate(mcc_vec3f delta) {
+    return (mcc_mat4f) {{
+        {{ 1.0f,    0.0f,    0.0f,     0.0f }},
+        {{ 0.0f,    1.0f,    0.0f,     0.0f }},
+        {{ 0.0f,    0.0f,    1.0f,     0.0f }},
+        {{ delta.x, delta.y, delta.z,  1.0f }},
+    }};
+}
+
 mcc_mat4f mcc_mat4f_translate_x(float delta) {
     return (mcc_mat4f) {{
         {{ 1.0f,  0.0f,  0.0f,  0.0f }},

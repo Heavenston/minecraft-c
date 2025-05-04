@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 4.0)
 project(mcc LANGUAGES C)
 
+set(CMAKE_C_COMPILER clang)
 set(CMAKE_C_STANDARD 23)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
@@ -9,8 +10,8 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Debug)
 endif()
 
-set(CMAKE_C_FLAGS "-Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion")
-set(CMAKE_C_FLAGS_DEBUG "-g3 -O1")
+set(CMAKE_C_FLAGS "-Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wmissing-field-initializers -Wuninitialized")
+set(CMAKE_C_FLAGS_DEBUG "-g3 -O1 -fsanitize=address")
 set(CMAKE_C_FLAGS_RELEASE "-O3 -DNDEBUG -ffast-math")
 
 file(GLOB_RECURSE PROJECT_SOURCES CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/src/*.c")

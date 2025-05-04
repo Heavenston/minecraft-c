@@ -65,14 +65,14 @@ int main() {
     };
 
     // Camera control variables
-    float rotation_x = 0.5f;  // Looking down slightly to see the bottom
+    float rotation_x = 0.0f;
     float rotation_y = 0.0f;
-    float zoom = 45.0f;       // Distance from origin
     
     const float rotation_delta = 0.1f;
-    const float zoom_delta = 2.0f;
 
     bool enable_wireframe = false;
+
+    mcc_vec3f camera_pos = {{ 6.f, 5.5f, 6.f }};
 
     for (bool close = false; !close;) {
         union mcc_window_event event = mcc_window_wait_next_event(window);
@@ -93,17 +93,10 @@ int main() {
                 rotation_y += rotation_delta;
                 need_redraw = true;
             } else if (event.key_press.keycode == KEY_UP) {
-                rotation_x += rotation_delta;
-                need_redraw = true;
-            } else if (event.key_press.keycode == KEY_DOWN) {
                 rotation_x -= rotation_delta;
                 need_redraw = true;
-            } else if (event.key_press.keycode == 38 /* 'a' */) {
-                zoom -= zoom_delta;
-                if (zoom < 5.0f) zoom = 5.0f;
-                need_redraw = true;
-            } else if (event.key_press.keycode == 52 /* 'z' */) {
-                zoom += zoom_delta;
+            } else if (event.key_press.keycode == KEY_DOWN) {
+                rotation_x += rotation_delta;
                 need_redraw = true;
             } else if (event.key_press.keycode == 25 /* 'w' */) {
                 enable_wireframe = !enable_wireframe;
@@ -127,8 +120,7 @@ int main() {
             auto geometry = mcc_window_get_geometry(window);
 
             size_t height = safe_to_size_t(geometry.height),
-                   width  = safe_to_size_t(geometry.width),
-                   bytes  = height * width * 4;
+                   width  = safe_to_size_t(geometry.width);
 
             /*
              * Update the model view projection matrix
@@ -137,21 +129,19 @@ int main() {
             
             // Model transformations - center the chunk and scale it appropriately
             mcc_mat4f model = mcc_mat4f_identity();
-            model = mcc_mat4f_mul(model, mcc_mat4f_translate_x(-8.0f));
-            model = mcc_mat4f_mul(model, mcc_mat4f_translate_z(-8.0f));
-            model = mcc_mat4f_mul(model, mcc_mat4f_translate_y(-3.0f));
             
             // View transformations - position camera to look at the bottom of the chunk
             mcc_mat4f view = mcc_mat4f_identity();
-            view = mcc_mat4f_mul(view, mcc_mat4f_translate_z(zoom)); // Move back to see the chunk
-            view = mcc_mat4f_mul(view, mcc_mat4f_rotate_x(rotation_x)); // Tilt to see bottom
-            view = mcc_mat4f_mul(view, mcc_mat4f_rotate_y(rotation_y)); // Rotate around Y axis
+            view = mcc_mat4f_mul(view, mcc_mat4f_translate(mcc_vec3f_scale(camera_pos, +1.f)));
+            view = mcc_mat4f_mul(view, mcc_mat4f_rotate_y(rotation_y));
+            view = mcc_mat4f_mul(view, mcc_mat4f_rotate_x(rotation_x));
+            view = mcc_mat4f_inverse(view);
             
             // Projection
             mcc_mat4f projection = mcc_mat4f_perspective(
                 (float)width / (float)height,
                 0.1f, 1000.0f,
-                MCC_PIf / 4.0f
+                MCC_PIf / 2.0f
             );
 
             render_object.mvp = mcc_mat4f_mul(projection, mcc_mat4f_mul(view, model));
@@ -159,8 +149,8 @@ int main() {
             /*
              * Allocate image and depth buffers
              */
-            uint8_t *image_data = malloc(bytes);
-            float32_t *depth_data = malloc(bytes);
+            uint8_t *image_data = malloc(width * height * sizeof(*image_data) * 4);
+            float32_t *depth_data = malloc(width * height * sizeof(*depth_data));
             struct mcc_cpurast_rendering_attachment attachment = {
                 .o_depth = &(struct mcc_cpurast_rendering_depth_attachment) { .r_data = depth_data },
                 .o_color = &(struct mcc_cpurast_rendering_color_attachment) { .r_data = image_data, },

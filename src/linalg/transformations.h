@@ -8,6 +8,8 @@ mcc_mat4f mcc_mat4f_rotate_y(float theta);
 
 mcc_mat4f mcc_mat4f_rotate_z(float theta);
 
+mcc_mat4f mcc_mat4f_translate(mcc_vec3f delta);
+
 mcc_mat4f mcc_mat4f_translate_x(float theta);
 
 mcc_mat4f mcc_mat4f_translate_y(float theta);

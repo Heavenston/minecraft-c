@@ -10,6 +10,185 @@
 #include <stdlib.h>
 #include <string.h>
 
+struct processed_vertex {
+    union mcc_cpurast_shaders_varying *varyings;
+    mcc_vec4f pos_homogeneous;
+};
+
+struct plane {
+    mcc_vec4f normal;
+    float D;
+};
+
+typedef union {
+    struct {
+        struct processed_vertex v0;
+        struct processed_vertex v1;
+        struct processed_vertex v2;
+    };
+    struct processed_vertex vertices[3];
+} primitive_t;
+
+struct clip_triangle_output {
+    bool has_triangle_0;
+    primitive_t triangle_0;
+    bool has_triangle_1;
+    primitive_t triangle_1;
+};
+
+/**
+ * Maximum number of triangles after clipping a single triangle
+ */
+#define MAX_SUBTRIANGLES 4
+/**
+ * Number of varyings to allocate at the start of rasterization.
+ */
+#define PREALLOCATED_VARYINGS_SIZE (MAX_SUBTRIANGLES * 3)
+
+static float signed_distance(struct plane plane, mcc_vec4f vertex) {
+    return mcc_vec4f_dot(plane.normal, vertex) + plane.D;
+}
+
+struct clip_triangle_context {
+    size_t varyings_count;
+    primitive_t triangle;
+    struct plane plane;
+};
+
+typedef struct intersection_context {
+    struct clip_triangle_context *ctctx;
+    struct processed_vertex v0;
+    struct processed_vertex v1;
+    float value0;
+    float value1;
+} ic_t;
+
+static struct processed_vertex clip_edge(ic_t ctx) {
+    float t = ctx.value0 / (ctx.value0 - ctx.value1);
+
+    struct processed_vertex v;
+    v.pos_homogeneous = mcc_vec4f_add(
+        mcc_vec4f_scale(ctx.v0.pos_homogeneous, 1.f - t),
+        mcc_vec4f_scale(ctx.v1.pos_homogeneous, t)
+    );
+    // TODO: Use pre allocated values (this is a leak)
+    v.varyings = malloc(sizeof(*v.varyings) * ctx.ctctx->varyings_count);
+    for (size_t vi = 0; vi < ctx.ctctx->varyings_count; vi++) {
+        v.varyings[vi].vec4f = mcc_vec4f_add(
+            mcc_vec4f_scale(ctx.v0.varyings[vi].vec4f, 1.f - t),
+            mcc_vec4f_scale(ctx.v1.varyings[vi].vec4f, t)
+        );
+    }
+
+    return v;
+}
+
+/*
+ * Adapted from
+ * https://www.gabrielgambetta.com/computer-graphics-from-scratch/11-clipping.html
+ * And
+ * https://lisyarus.github.io/blog/posts/implementing-a-tiny-cpu-rasterizer-part-5.html
+ */
+static struct clip_triangle_output clip_triangle(struct clip_triangle_context ctx) {
+    primitive_t triangle = ctx.triangle;
+    struct plane plane = ctx.plane;
+    struct clip_triangle_output output = {};
+
+    float values[3] = {
+        signed_distance(plane, triangle.v0.pos_homogeneous),
+        signed_distance(plane, triangle.v1.pos_homogeneous),
+        signed_distance(plane, triangle.v2.pos_homogeneous)
+    };
+
+    uint8_t mask = (values[0] <= 0.f ? 1 : 0) | (values[1] <= 0.f ? 2 : 0) | (values[2] <= 0.f ? 4 : 0);
+
+    switch (mask) {
+    case 0b000:
+        output.has_triangle_0 = true;
+        output.triangle_0 = triangle;
+        break;
+    case 0b001: {
+        struct processed_vertex v01 = clip_edge((ic_t){ &ctx, triangle.v0, triangle.v1, values[0], values[1] });
+        struct processed_vertex v02 = clip_edge((ic_t){ &ctx, triangle.v0, triangle.v2, values[0], values[2] });
+
+        output.has_triangle_0 = true;
+        output.triangle_0.v0 = v01;
+        output.triangle_0.v1 = triangle.v1;
+        output.triangle_0.v2 = triangle.v2;
+
+        output.has_triangle_1 = true;
+        output.triangle_1.v0 = v01;
+        output.triangle_1.v1 = triangle.v2;
+        output.triangle_1.v2 = v02;
+        break;
+    }
+    case 0b010: {
+        struct processed_vertex v10 = clip_edge((ic_t){ &ctx, triangle.v1, triangle.v0, values[1], values[0] });
+        struct processed_vertex v12 = clip_edge((ic_t){ &ctx, triangle.v1, triangle.v2, values[1], values[2] });
+
+        output.has_triangle_0 = true;
+        output.triangle_0.v0 = triangle.v0;
+        output.triangle_0.v1 = v10;
+        output.triangle_0.v2 = triangle.v2;
+
+        output.has_triangle_1 = true;
+        output.triangle_1.v0 = triangle.v2;
+        output.triangle_1.v1 = v10;
+        output.triangle_1.v2 = v12;
+        break;
+    }
+    case 0b011: {
+        struct processed_vertex v02 = clip_edge((ic_t){ &ctx, triangle.v0, triangle.v2, values[0], values[2] });
+        struct processed_vertex v12 = clip_edge((ic_t){ &ctx, triangle.v1, triangle.v2, values[1], values[2] });
+
+        output.has_triangle_0 = true;
+        output.triangle_0.v0 = v02;
+        output.triangle_0.v1 = v12;
+        output.triangle_0.v2 = triangle.v2;
+        break;
+    }
+    case 0b100: {
+        struct processed_vertex v20 = clip_edge((ic_t){ &ctx, triangle.v2, triangle.v0, values[2], values[0] });
+        struct processed_vertex v21 = clip_edge((ic_t){ &ctx, triangle.v2, triangle.v1, values[2], values[1] });
+
+        output.has_triangle_0 = true;
+        output.triangle_0.v0 = triangle.v0;
+        output.triangle_0.v1 = triangle.v1;
+        output.triangle_0.v2 = v20;
+
+        output.has_triangle_1 = true;
+        output.triangle_1.v0 = v20;
+        output.triangle_1.v1 = triangle.v1;
+        output.triangle_1.v2 = v21;
+        break;
+    }
+    case 0b101: {
+        struct processed_vertex v01 = clip_edge((ic_t){ &ctx, triangle.v0, triangle.v1, values[0], values[1] });
+        struct processed_vertex v21 = clip_edge((ic_t){ &ctx, triangle.v2, triangle.v1, values[2], values[1] });
+
+        output.has_triangle_0 = true;
+        output.triangle_0.v0 = v01;
+        output.triangle_0.v1 = triangle.v1;
+        output.triangle_0.v2 = v21;
+        break;
+    }
+    case 0b110: {
+        struct processed_vertex v10 = clip_edge((ic_t){ &ctx, triangle.v1, triangle.v0, values[1], values[0] });
+        struct processed_vertex v20 = clip_edge((ic_t){ &ctx, triangle.v2, triangle.v0, values[2], values[0] });
+
+        output.has_triangle_0 = true;
+        output.triangle_0.v0 = triangle.v0;
+        output.triangle_0.v1 = v10;
+        output.triangle_0.v2 = v20;
+        break;
+    }
+    case 0b111:
+        break;
+    }
+
+    return output;
+}
+ 
 void mcc_cpurast_clear(const struct mcc_cpurast_clear_config *r_config) {
     uint32_t size = r_config->r_attachment->height * r_config->r_attachment->width;
 
@@ -141,12 +320,6 @@ static struct mcc_barycentric_coords mcc_calculate_barycentric(mcc_vec2f v0, mcc
     return result;
 }
 
-struct processed_vertex {
-    union mcc_cpurast_shaders_varying *varyings;
-    mcc_vec3f pos3;
-    mcc_vec4f pos4;
-};
-
 struct mcc_pixel_params {
     struct mcc_barycentric_coords barycentric;
     mcc_vec2f screen_pos;
@@ -156,9 +329,15 @@ struct mcc_pixel_params {
 
 typedef bool (*mcc_polygon_filter_fn)(const struct mcc_barycentric_coords *coords);
 
+typedef struct {
+    union mcc_cpurast_shaders_varying *v[PREALLOCATED_VARYINGS_SIZE];
+} preallocated_varyings_t;
+
 struct mcc_rasterization_context {
+    enum mcc_cpurast_culling_mode culling_mode;
+    preallocated_varyings_t *r_preallocated_varyings;
     struct mcc_cpurast_rendering_attachment *r_attachment;
-    const struct processed_vertex *r_vertices;
+    primitive_t *r_primitive;
     union mcc_cpurast_shaders_varying *r_fragment_varyings;
     struct mcc_cpurast_fragment_shader_input *r_frag_input;
     struct mcc_fragment_shader *r_fragment_shader;
@@ -182,11 +361,14 @@ static void draw_line(const struct mcc_rasterization_context *r_context,
                      const struct processed_vertex *v1) {
     float wf = (float)r_context->r_attachment->width;
     float hf = (float)r_context->r_attachment->height;
+
+    mcc_vec3f v0_pos_euclidian = mcc_vec3f_scale(v0->pos_homogeneous.xyz, 1.f / v0->pos_homogeneous.w);
+    mcc_vec3f v1_pos_euclidian = mcc_vec3f_scale(v1->pos_homogeneous.xyz, 1.f / v1->pos_homogeneous.w);
     
-    int x0 = (int)(((v0->pos3.x + 1.f) * 0.5f * wf) + 0.5f);
-    int y0 = (int)(((-v0->pos3.y + 1.f) * 0.5f * hf) + 0.5f);
-    int x1 = (int)(((v1->pos3.x + 1.f) * 0.5f * wf) + 0.5f);
-    int y1 = (int)(((-v1->pos3.y + 1.f) * 0.5f * hf) + 0.5f);
+    int x0 = (int)(((v0_pos_euclidian.x + 1.f) * 0.5f * wf) + 0.5f);
+    int y0 = (int)(((-v0_pos_euclidian.y + 1.f) * 0.5f * hf) + 0.5f);
+    int x1 = (int)(((v1_pos_euclidian.x + 1.f) * 0.5f * wf) + 0.5f);
+    int y1 = (int)(((-v1_pos_euclidian.y + 1.f) * 0.5f * hf) + 0.5f);
 
     int dx = abs(x1 - x0);
     int dy = -abs(y1 - y0);
@@ -205,8 +387,8 @@ static void draw_line(const struct mcc_rasterization_context *r_context,
                 ((float)y0 + 0.5f) / hf *-2.f + 1.f,
             }};
             
-            int origX0 = (int)(((v0->pos3.x + 1.f) * 0.5f * wf) + 0.5f);
-            int origY0 = (int)(((-v0->pos3.y + 1.f) * 0.5f * hf) + 0.5f);
+            int origX0 = (int)(((v0_pos_euclidian.x + 1.f) * 0.5f * wf) + 0.5f);
+            int origY0 = (int)(((-v0_pos_euclidian.y + 1.f) * 0.5f * hf) + 0.5f);
             
             float currentDistSq = (float)((x0 - origX0) * (x0 - origX0) + (y0 - origY0) * (y0 - origY0));
             float totalDistSq = (float)((x1 - origX0) * (x1 - origX0) + (y1 - origY0) * (y1 - origY0));
@@ -227,7 +409,7 @@ static void draw_line(const struct mcc_rasterization_context *r_context,
                 .isInside = true
             };
             
-            float depth = v0->pos3.z * (1.0f - t) + v1->pos3.z * t;
+            float depth = v0_pos_euclidian.z * (1.0f - t) + v1_pos_euclidian.z * t;
             
             auto depth_attachment = r_context->r_attachment->o_depth;
             if (depth < 0.f || depth > 1.f) {
@@ -275,34 +457,26 @@ static bool polygon_filter_point(const struct mcc_barycentric_coords *coords) {
            coords->w >= (1.0f - point_threshold);
 }
 
-void process_vertex_init(struct processed_vertex *v, size_t varying_count) {
-    v->varyings = calloc(varying_count, sizeof(mcc_vec4f));
-}
-
-void process_vertex_free(struct processed_vertex *v) {
-    free(v->varyings);
-}
-
 // Helper function to process a single fragment
 static void process_fragment(const struct mcc_rasterization_context *r_context, const struct mcc_pixel_params *pixel) {
     auto depth_attachment = r_context->r_attachment->o_depth;
     auto color_attachment = r_context->r_attachment->o_color;
-    const struct processed_vertex *vertices = r_context->r_vertices;
+    primitive_t *primitive = r_context->r_primitive;
     const struct mcc_barycentric_coords *barycentric = &pixel->barycentric;
     
     // Interpolation of varying attributes
     for (size_t varying_i = 0; varying_i < r_context->varying_count; varying_i++) {
         // Get the w-coordinate from each vertex (reciprocal of the homogeneous 4th component)
-        float w0 = 1.0f / vertices[0].pos4.w;
-        float w1 = 1.0f / vertices[1].pos4.w;
-        float w2 = 1.0f / vertices[2].pos4.w;
+        float w0 = 1.0f / primitive->v0.pos_homogeneous.w;
+        float w1 = 1.0f / primitive->v1.pos_homogeneous.w;
+        float w2 = 1.0f / primitive->v2.pos_homogeneous.w;
         
         float w_interpolated = barycentric->w * w0 + barycentric->u * w1 + barycentric->v * w2;
         float correction = 1.0f / w_interpolated;
         
-        mcc_vec4f var0 = vertices[0].varyings[varying_i].vec4f;
-        mcc_vec4f var1 = vertices[1].varyings[varying_i].vec4f;
-        mcc_vec4f var2 = vertices[2].varyings[varying_i].vec4f;
+        mcc_vec4f var0 = primitive->v0.varyings[varying_i].vec4f;
+        mcc_vec4f var1 = primitive->v1.varyings[varying_i].vec4f;
+        mcc_vec4f var2 = primitive->v2.varyings[varying_i].vec4f;
         
         mcc_vec4f result;
         for (int i = 0; i < 4; i++) {
@@ -334,34 +508,53 @@ static void process_fragment(const struct mcc_rasterization_context *r_context, 
     }
 }
 
-static void rasterize_triangle(const struct mcc_rasterization_context *r_context) {
+static void rasterize_triangle_after_clipping(const struct mcc_rasterization_context *r_context) {
     auto depth_attachment = r_context->r_attachment->o_depth;
-    const struct processed_vertex *vertices = r_context->r_vertices;
-    
-    if (r_context->polygon_filter == polygon_filter_wireframe) {
-        draw_line(r_context, &vertices[0], &vertices[1]);
-        draw_line(r_context, &vertices[1], &vertices[2]);
-        draw_line(r_context, &vertices[2], &vertices[0]);
-        return;
-    }
+    primitive_t *primitive = r_context->r_primitive;
 
     // Get vertex positions
-    mcc_vec3f v0 = vertices[0].pos3,
-              v1 = vertices[1].pos3,
-              v2 = vertices[2].pos3;
+    mcc_vec3f v0 = mcc_vec3f_scale(primitive->v0.pos_homogeneous.xyz, 1.f / primitive->v0.pos_homogeneous.w),
+              v1 = mcc_vec3f_scale(primitive->v1.pos_homogeneous.xyz, 1.f / primitive->v1.pos_homogeneous.w),
+              v2 = mcc_vec3f_scale(primitive->v2.pos_homogeneous.xyz, 1.f / primitive->v2.pos_homogeneous.w);
     mcc_vec2f p0 = v0.xy,
               p1 = v1.xy,
               p2 = v2.xy;
+
+    bool isCcw = check_point(p2, p0, p1);
+
+    if ((r_context->culling_mode == MCC_CPURAST_CULLING_MODE_CW && isCcw) ||
+        (r_context->culling_mode == MCC_CPURAST_CULLING_MODE_CCW && !isCcw))
+        return;
+
+    // TODO
+    // if (r_context->culling_mode != MCC_CPURAST_CULLING_MODE_CCW && isCcw) {
+    //     mcc_vec2f t2 = p1;
+    //     p1 = p2;
+    //     p2 = t2;
+    //     mcc_vec3f t3 = v1;
+    //     v1 = v2;
+    //     v2 = t3;
+    //     struct processed_vertex tv = primitive->v1;
+    //     primitive->v1 = primitive->v2;
+    //     primitive->v2 = tv;
+    // }
+    
+    if (r_context->polygon_filter == polygon_filter_wireframe) {
+        draw_line(r_context, &primitive->v0, &primitive->v1);
+        draw_line(r_context, &primitive->v1, &primitive->v2);
+        draw_line(r_context, &primitive->v2, &primitive->v0);
+        return;
+    }
 
     // Screen dimensions as floats
     float wf = (float)r_context->r_attachment->width;
     float hf = (float)r_context->r_attachment->height;
 
     // AABB of the triangle in viewport coordinate
-    float min_xf = min3f(p0.x, p1.x, p2.x);
-    float min_yf = min3f(p0.y, p1.y, p2.y);
-    float max_xf = max3f(p0.x, p1.x, p2.x);
-    float max_yf = max3f(p0.y, p1.y, p2.y);
+    float min_xf = clampf(min3f(p0.x, p1.x, p2.x), -1.f, 1.f);
+    float min_yf = clampf(min3f(p0.y, p1.y, p2.y), -1.f, 1.f);
+    float max_xf = clampf(max3f(p0.x, p1.x, p2.x), -1.f, 1.f);
+    float max_yf = clampf(max3f(p0.y, p1.y, p2.y), -1.f, 1.f);
 
     // AABB of the triangle in screen coordinate
     // NOTE: Since y is inverted we need to take the min pos to have the max pixel
@@ -370,18 +563,23 @@ static void rasterize_triangle(const struct mcc_rasterization_context *r_context
     uint32_t max_x = (uint32_t)(( max_xf + 1.f) * 0.5f * wf + 0.5f);
     uint32_t max_y = (uint32_t)((-min_yf + 1.f) * 0.5f * hf + 0.5f);
 
+    assert(max_x <= r_context->r_attachment->width);
+    assert(max_y <= r_context->r_attachment->height);
+    assert(min_x <= max_x);
+    assert(min_y <= max_y);
+
     // Iterate over pixels
     for (uint32_t y = min_y; y < max_y; y++) {
         for (uint32_t x = min_x; x < max_x; x++) {
             size_t pixel_idx = x + y * r_context->r_attachment->width;
 
-            float fx = (float)x + 0.5f;
-            float fy = (float)y + 0.5f;
+            float fx = (float)x + 0.5f,
+                  fy = (float)y + 0.5f;
 
             // Normalized screen coordinates
             mcc_vec2f screen_pos = {{
-                (fx / wf) * 2.f - 1.f,
-                (fy / hf) *-2.f + 1.f,
+                fx * 2.f / wf - 1.f,
+                fy *-2.f / hf + 1.f,
             }};
 
             // Calculate barycentric coordinates
@@ -395,11 +593,6 @@ static void rasterize_triangle(const struct mcc_rasterization_context *r_context
 
             // Calculate depth using barycentric coordinates
             float depth = v1.z * barycentric.u + v2.z * barycentric.v + v0.z * barycentric.w;
-
-            // Early depth test
-            if (depth < 0. || depth > 1.) {
-                continue;
-            }
 
             // Depth comparison function test
             if (
@@ -422,6 +615,57 @@ static void rasterize_triangle(const struct mcc_rasterization_context *r_context
     }
 }
 
+static void rasterize_triangle_before_clipping(const struct mcc_rasterization_context *r_context) {
+    struct mcc_rasterization_context sub_context = *r_context;
+
+    size_t sub_primitive_size = 0;
+    primitive_t sub_primitive[MAX_SUBTRIANGLES];
+    sub_primitive[sub_primitive_size++] = *r_context->r_primitive;
+    assert(sub_primitive_size < MAX_SUBTRIANGLES);
+
+    struct plane planes[] = {
+        { .normal = (mcc_vec4f){{ +0.f, +0.f, +1.f, +1.f }}, .D = +0.00f },
+        { .normal = (mcc_vec4f){{ +0.f, +0.f, -1.f, +1.f }}, .D = +0.00f },
+
+        // NOTE: Clipping -x +x -y +y seems useless as said by lisyarus's blog
+        //       but does it have any advantage ??
+        // { .normal = (mcc_vec4f){{ +0.f, +1.f, +0.f, +1.f }}, .D = +0.00f },
+        // { .normal = (mcc_vec4f){{ +0.f, -1.f, +0.f, +1.f }}, .D = +0.00f },
+
+        // { .normal = (mcc_vec4f){{ +1.f, +0.f, +0.f, +1.f }}, .D = +0.00f },
+        // { .normal = (mcc_vec4f){{ -1.f, +0.f, +0.f, +1.f }}, .D = +0.00f },
+    };
+
+    for (size_t plane_i = 0; plane_i < sizeof(planes) / sizeof(*planes); plane_i++) {
+        // Temp array for clipped triangles
+        primitive_t sub_primitive_out[MAX_SUBTRIANGLES];
+        size_t sub_primitive_out_size = 0;
+
+        for (size_t primitive_i = 0; primitive_i < sub_primitive_size; primitive_i++) {
+            auto clip_output = clip_triangle((struct clip_triangle_context){
+                .varyings_count = r_context->varying_count,
+                .triangle = sub_primitive[primitive_i],
+                .plane = planes[plane_i],
+            });
+            if (clip_output.has_triangle_0)
+                sub_primitive_out[sub_primitive_out_size++] = clip_output.triangle_0;
+            assert(sub_primitive_out_size < MAX_SUBTRIANGLES);
+            if (clip_output.has_triangle_1)
+                sub_primitive_out[sub_primitive_out_size++] = clip_output.triangle_1;
+            assert(sub_primitive_out_size < MAX_SUBTRIANGLES);
+        }
+
+        memcpy(sub_primitive, sub_primitive_out, sizeof(sub_primitive));
+        sub_primitive_size = sub_primitive_out_size;
+    }
+
+    assert(sub_primitive_size < MAX_SUBTRIANGLES);
+    for (size_t primitive_i = 0; primitive_i < sub_primitive_size; primitive_i++) {
+        sub_context.r_primitive = &sub_primitive[primitive_i];
+        rasterize_triangle_after_clipping(&sub_context);
+    }
+}
+
 void mcc_cpurast_render(const struct mcc_cpurast_render_config *r_config) {
     assert(r_config->r_fragment_shader->varying_count == r_config->r_vertex_shader->varying_count);
     size_t varying_count = r_config->r_vertex_shader->varying_count;
@@ -441,11 +685,16 @@ void mcc_cpurast_render(const struct mcc_cpurast_render_config *r_config) {
             break;
     }
 
-    const size_t vertex_per_primitive = 3;
-    struct processed_vertex vertices[3];
-    for (size_t i = 0; i < vertex_per_primitive; i++) {
-        process_vertex_init(&vertices[i], varying_count);
+    preallocated_varyings_t preallocated_varyings;
+    for (size_t i = 0; i < PREALLOCATED_VARYINGS_SIZE; i++) {
+        preallocated_varyings.v[i] = calloc(varying_count, sizeof(mcc_vec4f));
     }
+
+    primitive_t primitive = { .vertices = {
+        { .varyings = preallocated_varyings.v[0] },
+        { .varyings = preallocated_varyings.v[1] },
+        { .varyings = preallocated_varyings.v[2] },
+    }};
     union mcc_cpurast_shaders_varying *fragment_varyings = calloc(varying_count, sizeof(mcc_vec4f));
 
     struct mcc_cpurast_fragment_shader_input frag_input = {
@@ -469,75 +718,59 @@ void mcc_cpurast_render(const struct mcc_cpurast_render_config *r_config) {
     case MCC_CPURAST_VERTEX_PROCESSING_TRIANGLE_STRIP:
         vertex_index_increment = 1;
         for (size_t di = 0; di < 2; di++, vertex_idx++) {
-            struct processed_vertex *pv = &vertices[di + 1];
+            struct processed_vertex *pv = &primitive.vertices[di + 1];
 
             vert_input.in_vertex_idx = vertex_idx;
             vert_input.r_out_varyings = pv->varyings;
             r_config->r_vertex_shader->r_fn(&vert_input);
-            pv->pos4 = vert_input.out_position;
-            pv->pos3 = mcc_vec3f_scale(pv->pos4.xyz, 1.f / pv->pos4.w);
+            pv->pos_homogeneous = vert_input.out_position;
         }
         break;
-    default:
-        // NOTE: Silence 'vertex_index_increment' may be uninitialized warning.
-        vertex_index_increment = 3;
-        abort();
     }
+
+    // Create rasterization context
+    struct mcc_rasterization_context context = {
+        .culling_mode = r_config->culling_mode,
+        .r_preallocated_varyings = &preallocated_varyings,
+        .r_attachment = r_config->r_attachment,
+        .r_primitive = &primitive,
+        .r_fragment_varyings = fragment_varyings,
+        .r_frag_input = &frag_input,
+        .r_fragment_shader = r_config->r_fragment_shader,
+        .o_depth_comparison_fn = r_config->o_depth_comparison_fn,
+        .varying_count = varying_count,
+        .polygon_filter = polygon_filter
+    };
 
     for (; vertex_idx < r_config->vertex_count; vertex_idx += vertex_index_increment) {
         switch (r_config->vertex_processing) {
         case MCC_CPURAST_VERTEX_PROCESSING_TRIANGLE_LIST:
             for (size_t di = 0; di < 3; di++) {
                 vert_input.in_vertex_idx = vertex_idx + safe_to_u32(di);
-                vert_input.r_out_varyings = vertices[di].varyings;
+                vert_input.r_out_varyings = primitive.vertices[di].varyings;
                 r_config->r_vertex_shader->r_fn(&vert_input);
-                vertices[di].pos4 = vert_input.out_position;
-                vertices[di].pos3 = mcc_vec3f_scale(vertices[di].pos4.xyz, 1.f / vertices[di].pos4.w);
+                primitive.vertices[di].pos_homogeneous = vert_input.out_position;
             }
             break;
         case MCC_CPURAST_VERTEX_PROCESSING_TRIANGLE_STRIP:
-            struct processed_vertex first = vertices[0];
-            vertices[0] = vertices[1];
-            vertices[1] = vertices[2];
-            vertices[2] = first;
+            // 'rotate' the vertices to put the last two as the first two
+            auto v0_copy = primitive.v0;
+            primitive.v0 = primitive.v1;
+            primitive.v1 = primitive.v2;
+            primitive.v2 = v0_copy;
 
             vert_input.in_vertex_idx = vertex_idx;
-            vert_input.r_out_varyings = vertices[2].varyings;
+            vert_input.r_out_varyings = primitive.v2.varyings;
             r_config->r_vertex_shader->r_fn(&vert_input);
-            vertices[2].pos4 = vert_input.out_position;
-            vertices[2].pos3 = mcc_vec3f_scale(vertices[2].pos4.xyz, 1.f / vertices[2].pos4.w);
+            primitive.v2.pos_homogeneous = vert_input.out_position;
             break;
         }
-
-        mcc_vec2f p0 = vertices[0].pos3.xy,
-                  p1 = vertices[1].pos3.xy,
-                  p2 = vertices[2].pos3.xy;
-
-        bool isCcw = check_point(p2, p0, p1);
-
-        if (r_config->culling_mode == MCC_CPURAST_CULLING_MODE_CW && !isCcw)
-            continue;
-        if (r_config->culling_mode == MCC_CPURAST_CULLING_MODE_CCW && isCcw)
-            continue;
-
-        // Create rasterization context
-        struct mcc_rasterization_context context = {
-            .r_attachment = r_config->r_attachment,
-            .r_vertices = vertices,
-            .r_fragment_varyings = fragment_varyings,
-            .r_frag_input = &frag_input,
-            .r_fragment_shader = r_config->r_fragment_shader,
-            .o_depth_comparison_fn = r_config->o_depth_comparison_fn,
-            .varying_count = varying_count,
-            .polygon_filter = polygon_filter
-        };
         
-        // Call the unified rasterization function
-        rasterize_triangle(&context);
+        rasterize_triangle_before_clipping(&context);
     }
 
-    for (size_t i = 0; i < vertex_per_primitive; i++) {
-        process_vertex_free(&vertices[i]);
+    for (size_t i = 0; i < PREALLOCATED_VARYINGS_SIZE; i++) {
+        free(preallocated_varyings.v[i]);
     }
     free(fragment_varyings);
 }
