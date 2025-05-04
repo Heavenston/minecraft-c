@@ -199,7 +199,7 @@ void mcc_chunk_fragment_shader_fn(struct mcc_cpurast_fragment_shader_input *inpu
             break;
     }
 
-    mcc_vec3f strong_light_dir = mcc_vec3f_normalized((mcc_vec3f){{ 1.f, 1.5f, -2.5f }});
+    mcc_vec3f strong_light_dir = mcc_vec3f_normalized((mcc_vec3f){{ 1.f, 2.5f, -1.5f }});
     mcc_vec3f soft_light_dir = mcc_vec3f_scale(strong_light_dir, -1.f);
 
     float strong_diffuse = clampf(mcc_vec3f_dot(normal, strong_light_dir), 0.f, 1.f);
