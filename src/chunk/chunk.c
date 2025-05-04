@@ -3,8 +3,18 @@
 static enum mcc_block_type mcc_chunk_get_block(mcc_world_seed_t, size_t x, size_t y, size_t z) {
     const size_t grass_height = 20;
 
+    if (x == 8 && z == 8 && y >= 3 && y <= 8)
+        return MCC_BLOCK_TYPE_LOG;
+
+    if (x >= 6 && z >= 6 && x <= 10 && z <= 10 && y >= 7 && y <= 9)
+        return MCC_BLOCK_TYPE_LEAVES;
+ 
     if (y == 0)
         return MCC_BLOCK_TYPE_STONE;
+    else if (y == 1)
+        return MCC_BLOCK_TYPE_DIRT;
+    else if (y == 2)
+        return MCC_BLOCK_TYPE_GRASS;
     else
         return MCC_BLOCK_TYPE_AIR;
 

@@ -187,15 +187,11 @@ enum triangulation_axis: uint8_t {
 };
 
 struct chunk_meshing_faces {
+    /**
+     * For each block, assigns a bit for each face for wether it is not
+     * obstructed and so wether a mesh surface should be put.
+     */
     uint8_t to_mesh_faces[MCC_CHUNK_WIDTH*MCC_CHUNK_WIDTH*MCC_CHUNK_HEIGHT];
-};
-
-struct chunk_block_meshing {
-    struct mcc_chunk_mesh *r_mesh;
-    struct mcc_chunk_data *r_chunk_data;
-    struct chunk_meshing_faces *r_meshing_faces;
-    enum mcc_block_type block_type;
-    size_t x, y, z;
 };
 
 struct block_face_data {
