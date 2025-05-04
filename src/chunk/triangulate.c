@@ -53,6 +53,7 @@ struct face_mesh {
     struct mcc_chunk_mesh *r_mesh;
     size_t start_idx;
     float32_t x, y, z;
+    float32_t extent_x, extent_y, extent_z;
     bool clockwise; // Controls winding order of the face
 };
 
@@ -102,15 +103,15 @@ static inline void append_face_x(struct face_mesh fm) {
     // Default is counter-clockwise winding order
     mesh->positions[si+0] = (mcc_vec3f){{ x, y+0.f, z+0.f }};
     mesh->texcoords[si+0] = (mcc_vec2f){{ 0.f, 0.f }};
-    mesh->positions[si+1] = (mcc_vec3f){{ x, y+0.f, z+1.f }};
+    mesh->positions[si+1] = (mcc_vec3f){{ x, y+0.f, z+fm.extent_z }};
     mesh->texcoords[si+1] = (mcc_vec2f){{ 1.f, 0.f }};
-    mesh->positions[si+2] = (mcc_vec3f){{ x, y+1.f, z+0.f }};
+    mesh->positions[si+2] = (mcc_vec3f){{ x, y+fm.extent_y, z+0.f }};
     mesh->texcoords[si+2] = (mcc_vec2f){{ 0.f, 1.f }};
-    mesh->positions[si+3] = (mcc_vec3f){{ x, y+1.f, z+0.f }};
+    mesh->positions[si+3] = (mcc_vec3f){{ x, y+fm.extent_y, z+0.f }};
     mesh->texcoords[si+3] = (mcc_vec2f){{ 0.f, 1.f }};
-    mesh->positions[si+4] = (mcc_vec3f){{ x, y+0.f, z+1.f }};
+    mesh->positions[si+4] = (mcc_vec3f){{ x, y+0.f, z+fm.extent_z }};
     mesh->texcoords[si+4] = (mcc_vec2f){{ 1.f, 0.f }};
-    mesh->positions[si+5] = (mcc_vec3f){{ x, y+1.f, z+1.f }};
+    mesh->positions[si+5] = (mcc_vec3f){{ x, y+fm.extent_y, z+fm.extent_z }};
     mesh->texcoords[si+5] = (mcc_vec2f){{ 1.f, 1.f }};
 
     // If clockwise is requested, swap vertices to reverse winding order
@@ -128,15 +129,15 @@ static inline void append_face_z(struct face_mesh fm) {
     // Default is counter-clockwise winding order
     mesh->positions[si+0] = (mcc_vec3f){{ x+0.f, y+0.f, z }};
     mesh->texcoords[si+0] = (mcc_vec2f){{ 0.f, 0.f }};
-    mesh->positions[si+1] = (mcc_vec3f){{ x+1.f, y+0.f, z }};
+    mesh->positions[si+1] = (mcc_vec3f){{ x+fm.extent_x, y+0.f, z }};
     mesh->texcoords[si+1] = (mcc_vec2f){{ 1.f, 0.f }};
-    mesh->positions[si+2] = (mcc_vec3f){{ x+0.f, y+1.f, z }};
+    mesh->positions[si+2] = (mcc_vec3f){{ x+0.f, y+fm.extent_y, z }};
     mesh->texcoords[si+2] = (mcc_vec2f){{ 0.f, 1.f }};
-    mesh->positions[si+3] = (mcc_vec3f){{ x+0.f, y+1.f, z }};
+    mesh->positions[si+3] = (mcc_vec3f){{ x+0.f, y+fm.extent_y, z }};
     mesh->texcoords[si+3] = (mcc_vec2f){{ 0.f, 1.f }};
-    mesh->positions[si+4] = (mcc_vec3f){{ x+1.f, y+0.f, z }};
+    mesh->positions[si+4] = (mcc_vec3f){{ x+fm.extent_x, y+0.f, z }};
     mesh->texcoords[si+4] = (mcc_vec2f){{ 1.f, 0.f }};
-    mesh->positions[si+5] = (mcc_vec3f){{ x+1.f, y+1.f, z }};
+    mesh->positions[si+5] = (mcc_vec3f){{ x+fm.extent_x, y+fm.extent_y, z }};
     mesh->texcoords[si+5] = (mcc_vec2f){{ 1.f, 1.f }};
 
     // If clockwise is requested, swap vertices to reverse winding order
@@ -154,15 +155,15 @@ static inline void append_face_y(struct face_mesh fm) {
     // Default is counter-clockwise winding order
     mesh->positions[si+0] = (mcc_vec3f){{ x+0.f, y, z+0.f }};
     mesh->texcoords[si+0] = (mcc_vec2f){{ 0.f, 0.f }};
-    mesh->positions[si+1] = (mcc_vec3f){{ x+1.f, y, z+0.f }};
+    mesh->positions[si+1] = (mcc_vec3f){{ x+fm.extent_x, y, z+0.f }};
     mesh->texcoords[si+1] = (mcc_vec2f){{ 1.f, 0.f }};
-    mesh->positions[si+2] = (mcc_vec3f){{ x+0.f, y, z+1.f }};
+    mesh->positions[si+2] = (mcc_vec3f){{ x+0.f, y, z+fm.extent_z }};
     mesh->texcoords[si+2] = (mcc_vec2f){{ 0.f, 1.f }};
-    mesh->positions[si+3] = (mcc_vec3f){{ x+0.f, y, z+1.f }};
+    mesh->positions[si+3] = (mcc_vec3f){{ x+0.f, y, z+fm.extent_z }};
     mesh->texcoords[si+3] = (mcc_vec2f){{ 0.f, 1.f }};
-    mesh->positions[si+4] = (mcc_vec3f){{ x+1.f, y, z+0.f }};
+    mesh->positions[si+4] = (mcc_vec3f){{ x+fm.extent_x, y, z+0.f }};
     mesh->texcoords[si+4] = (mcc_vec2f){{ 1.f, 0.f }};
-    mesh->positions[si+5] = (mcc_vec3f){{ x+1.f, y, z+1.f }};
+    mesh->positions[si+5] = (mcc_vec3f){{ x+fm.extent_x, y, z+fm.extent_z }};
     mesh->texcoords[si+5] = (mcc_vec2f){{ 1.f, 1.f }};
     
     // If clockwise is requested, swap vertices to reverse winding order
@@ -283,6 +284,9 @@ void mcc_chunk_mesh_create(struct mcc_chunk_mesh *r_mesh, struct mcc_chunk_data 
         for (size_t z = 0; z < MCC_CHUNK_WIDTH; z++) {
             for (size_t x = 0; x < MCC_CHUNK_WIDTH; x++) {
                 size_t block_idx = mcc_chunk_block_idx(x, y, z);
+                enum mcc_block_type bt = r_chunk_data->blocks[block_idx];
+                if (bt == MCC_BLOCK_TYPE_AIR)
+                    continue;
 
                 for (size_t fi = 0; fi < 6; fi++) {
                     auto face = &block_faces[fi];
@@ -291,12 +295,29 @@ void mcc_chunk_mesh_create(struct mcc_chunk_mesh *r_mesh, struct mcc_chunk_data 
                         continue;
                     }
 
+                    size_t extent_x = 0;
+                    size_t extended_idx;
+                    // Try to extend in the x direction with the condition
+                    // that the block type is the same
+                    while (
+                        x + extent_x + 1 < MCC_CHUNK_WIDTH &&
+                        meshing_faces->to_mesh_faces[(extended_idx = mcc_chunk_block_idx(x + extent_x + 1, y, z))] & face->face &&
+                        r_chunk_data->blocks[extended_idx] == bt
+                    ) {
+                        // If we extend this face's mesh to it we do not need to mesh it
+                        meshing_faces->to_mesh_faces[extended_idx] &= ~face->face;
+                        extent_x++;
+                    }
+
                     struct face_mesh face_mesh = {
                         .r_mesh = r_mesh,
                         .start_idx = r_mesh->vertex_count,
                         .x = (float)x + (face->dx == 0 ? 0.f : face->dx < 0 ? 0.f : 1.f),
                         .y = (float)y + (face->dy == 0 ? 0.f : face->dy < 0 ? 0.f : 1.f),
                         .z = (float)z + (face->dz == 0 ? 0.f : face->dz < 0 ? 0.f : 1.f),
+                        .extent_x = (float)(extent_x + 1),
+                        .extent_y = 1.f,
+                        .extent_z = 1.f,
                         .clockwise = !face->is_negative,
                     };
                     add_vertices(r_mesh, 6);
