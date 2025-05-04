@@ -64,11 +64,13 @@ void mcc_chunk_fragment_shader_fn(struct mcc_cpurast_fragment_shader_input *inpu
             break;
     }
 
-    mcc_vec3f light_dir = mcc_vec3f_normalized((mcc_vec3f){{ 1.f, 1.5f, -2.5f }});
+    mcc_vec3f strong_light_dir = mcc_vec3f_normalized((mcc_vec3f){{ 1.f, 1.5f, -2.5f }});
+    mcc_vec3f soft_light_dir = mcc_vec3f_scale(strong_light_dir, -1.f);
 
-    float diffuse = clampf(mcc_vec3f_dot(normal, light_dir), 0.f, 1.f);
+    float strong_diffuse = clampf(mcc_vec3f_dot(normal, strong_light_dir), 0.f, 1.f);
+    float soft_diffuse = clampf(mcc_vec3f_dot(normal, soft_light_dir), 0.f, 1.f);
     float ambient = 0.25f;
-    float cf = clampf(diffuse + ambient, 0.f, 1.f);
+    float cf = clampf(strong_diffuse + soft_diffuse * 0.15f + ambient, 0.f, 1.f);
 
     input->out_color = mcc_vec4f_scale(input->out_color, cf);
     input->out_color.a = 1.f;
