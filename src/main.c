@@ -136,11 +136,10 @@ int main() {
              */
             
             // Model transformations - center the chunk and scale it appropriately
-            // (chunk is 16x256x16, so scale to make it visible)
             mcc_mat4f model = mcc_mat4f_identity();
-            model = mcc_mat4f_mul(model, mcc_mat4f_translate_x(-8.0f)); // Center X
-            model = mcc_mat4f_mul(model, mcc_mat4f_translate_z(-8.0f)); // Center Z
-            // model = mcc_mat4f_mul(model, mcc_mat4f_scale_xyz(0.2f, 0.2f, 0.2f)); // Scale down
+            model = mcc_mat4f_mul(model, mcc_mat4f_translate_x(-8.0f));
+            model = mcc_mat4f_mul(model, mcc_mat4f_translate_z(-8.0f));
+            model = mcc_mat4f_mul(model, mcc_mat4f_translate_y(-3.0f));
             
             // View transformations - position camera to look at the bottom of the chunk
             mcc_mat4f view = mcc_mat4f_identity();
