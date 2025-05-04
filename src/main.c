@@ -185,7 +185,6 @@ int main() {
 
             // Render the chunk
             mcc_cpurast_clear(&clear_config);
-            printf("Rendering...\n");
 
             struct timespec t0, t1;
             timespec_get(&t0, TIME_UTC);
