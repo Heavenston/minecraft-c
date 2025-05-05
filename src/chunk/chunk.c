@@ -4,6 +4,9 @@ static enum mcc_block_type mcc_chunk_get_block(mcc_world_seed_t, size_t x, size_
     if (x == 8 && z == 8 && y >= 4 && y <= 9)
         return MCC_BLOCK_TYPE_LOG;
 
+    if (y == 10 && ((x == 6 && z == 6) || (x == 10 && z == 10) || (x == 10 && z == 6) || (x == 6 && z == 10)))
+        return MCC_BLOCK_TYPE_AIR;
+
     if (x >= 6 && z >= 6 && x <= 10 && z <= 10 && y >= 8 && y <= 10)
         return MCC_BLOCK_TYPE_LEAVES;
  
