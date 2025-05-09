@@ -51,16 +51,25 @@ const struct plane clipping_planes[] = {
     // { .normal = (mcc_vec4f){{ -1.f, +0.f, +0.f, +1.f }}, .D = +0.00f },
 };
 
+#define NUMBER_OF_CLIPPING_PLANES (sizeof(clipping_planes) / sizeof(*clipping_planes))
 /**
  * Maximum number of triangles after clipping a single triangle
  * Defined as the 2^(the number of clipping planes)
  * (because each clipping plane may didive each triangle in two)
  */
-#define MAX_SUBTRIANGLES (1UL << (sizeof(clipping_planes) / sizeof(*clipping_planes)))
+#define MAX_SUBTRIANGLES (1UL << NUMBER_OF_CLIPPING_PLANES)
 /**
  * Number of varyings to allocate at the start of rasterization.
  */
-#define PREALLOCATED_VARYINGS_SIZE (MAX_SUBTRIANGLES * 3)
+#define PREALLOCATED_VARYINGS_SIZE (MAX_SUBTRIANGLES * 6)
+
+typedef struct {
+    union mcc_cpurast_shaders_varying *v[PREALLOCATED_VARYINGS_SIZE];
+    /**
+     * Index of the next free (currently unused) varying array.
+     */
+    size_t free_head;
+} preallocated_varyings_t;
 
 static float signed_distance(struct plane plane, mcc_vec4f vertex) {
     return mcc_vec4f_dot(plane.normal, vertex) + plane.D;
@@ -68,12 +77,14 @@ static float signed_distance(struct plane plane, mcc_vec4f vertex) {
 
 struct clip_triangle_context {
     size_t varyings_count;
+    preallocated_varyings_t *preallocated_varyings;
     primitive_t triangle;
     struct plane plane;
 };
 
 typedef struct intersection_context {
     struct clip_triangle_context *ctctx;
+    union mcc_cpurast_shaders_varying *touse_varyings;
     struct processed_vertex v0;
     struct processed_vertex v1;
     float value0;
@@ -90,7 +101,7 @@ static struct processed_vertex clip_edge(ic_t ctx) {
     );
     v.w_inv = 1.f / v.pos_homogeneous.w;
     // TODO: Use pre allocated values (this is a leak)
-    v.varyings = malloc(sizeof(*v.varyings) * ctx.ctctx->varyings_count);
+    v.varyings = ctx.touse_varyings;
     for (size_t vi = 0; vi < ctx.ctctx->varyings_count; vi++) {
         v.varyings[vi].vec4f = mcc_vec4f_add(
             mcc_vec4f_scale(ctx.v0.varyings[vi].vec4f, 1.f - t),
@@ -120,14 +131,21 @@ static struct clip_triangle_output clip_triangle(struct clip_triangle_context ct
 
     uint8_t mask = (values[0] <= 0.f ? 1 : 0) | (values[1] <= 0.f ? 2 : 0) | (values[2] <= 0.f ? 4 : 0);
 
+    // Preemptively allocate two varyings array, but decrement the free_head if they
+    // end up not being used, kinda ugly but i dont want to have these 2 lines
+    // 6 times
+    auto nva = ctx.preallocated_varyings->v[ctx.preallocated_varyings->free_head++];
+    auto nvb = ctx.preallocated_varyings->v[ctx.preallocated_varyings->free_head++];
+
     switch (mask) {
     case 0b000:
         output.has_triangle_0 = true;
         output.triangle_0 = triangle;
+        ctx.preallocated_varyings->free_head -= 2;
         break;
     case 0b001: {
-        struct processed_vertex v01 = clip_edge((ic_t){ &ctx, triangle.v0, triangle.v1, values[0], values[1] });
-        struct processed_vertex v02 = clip_edge((ic_t){ &ctx, triangle.v0, triangle.v2, values[0], values[2] });
+        struct processed_vertex v01 = clip_edge((ic_t){ &ctx, nva, triangle.v0, triangle.v1, values[0], values[1] });
+        struct processed_vertex v02 = clip_edge((ic_t){ &ctx, nvb, triangle.v0, triangle.v2, values[0], values[2] });
 
         output.has_triangle_0 = true;
         output.triangle_0.v0 = v01;
@@ -141,8 +159,8 @@ static struct clip_triangle_output clip_triangle(struct clip_triangle_context ct
         break;
     }
     case 0b010: {
-        struct processed_vertex v10 = clip_edge((ic_t){ &ctx, triangle.v1, triangle.v0, values[1], values[0] });
-        struct processed_vertex v12 = clip_edge((ic_t){ &ctx, triangle.v1, triangle.v2, values[1], values[2] });
+        struct processed_vertex v10 = clip_edge((ic_t){ &ctx, nva, triangle.v1, triangle.v0, values[1], values[0] });
+        struct processed_vertex v12 = clip_edge((ic_t){ &ctx, nvb, triangle.v1, triangle.v2, values[1], values[2] });
 
         output.has_triangle_0 = true;
         output.triangle_0.v0 = triangle.v0;
@@ -156,8 +174,8 @@ static struct clip_triangle_output clip_triangle(struct clip_triangle_context ct
         break;
     }
     case 0b011: {
-        struct processed_vertex v02 = clip_edge((ic_t){ &ctx, triangle.v0, triangle.v2, values[0], values[2] });
-        struct processed_vertex v12 = clip_edge((ic_t){ &ctx, triangle.v1, triangle.v2, values[1], values[2] });
+        struct processed_vertex v02 = clip_edge((ic_t){ &ctx, nva, triangle.v0, triangle.v2, values[0], values[2] });
+        struct processed_vertex v12 = clip_edge((ic_t){ &ctx, nvb, triangle.v1, triangle.v2, values[1], values[2] });
 
         output.has_triangle_0 = true;
         output.triangle_0.v0 = v02;
@@ -166,8 +184,8 @@ static struct clip_triangle_output clip_triangle(struct clip_triangle_context ct
         break;
     }
     case 0b100: {
-        struct processed_vertex v20 = clip_edge((ic_t){ &ctx, triangle.v2, triangle.v0, values[2], values[0] });
-        struct processed_vertex v21 = clip_edge((ic_t){ &ctx, triangle.v2, triangle.v1, values[2], values[1] });
+        struct processed_vertex v20 = clip_edge((ic_t){ &ctx, nva, triangle.v2, triangle.v0, values[2], values[0] });
+        struct processed_vertex v21 = clip_edge((ic_t){ &ctx, nvb, triangle.v2, triangle.v1, values[2], values[1] });
 
         output.has_triangle_0 = true;
         output.triangle_0.v0 = triangle.v0;
@@ -181,8 +199,8 @@ static struct clip_triangle_output clip_triangle(struct clip_triangle_context ct
         break;
     }
     case 0b101: {
-        struct processed_vertex v01 = clip_edge((ic_t){ &ctx, triangle.v0, triangle.v1, values[0], values[1] });
-        struct processed_vertex v21 = clip_edge((ic_t){ &ctx, triangle.v2, triangle.v1, values[2], values[1] });
+        struct processed_vertex v01 = clip_edge((ic_t){ &ctx, nva, triangle.v0, triangle.v1, values[0], values[1] });
+        struct processed_vertex v21 = clip_edge((ic_t){ &ctx, nvb, triangle.v2, triangle.v1, values[2], values[1] });
 
         output.has_triangle_0 = true;
         output.triangle_0.v0 = v01;
@@ -191,8 +209,8 @@ static struct clip_triangle_output clip_triangle(struct clip_triangle_context ct
         break;
     }
     case 0b110: {
-        struct processed_vertex v10 = clip_edge((ic_t){ &ctx, triangle.v1, triangle.v0, values[1], values[0] });
-        struct processed_vertex v20 = clip_edge((ic_t){ &ctx, triangle.v2, triangle.v0, values[2], values[0] });
+        struct processed_vertex v10 = clip_edge((ic_t){ &ctx, nva, triangle.v1, triangle.v0, values[1], values[0] });
+        struct processed_vertex v20 = clip_edge((ic_t){ &ctx, nvb, triangle.v2, triangle.v0, values[2], values[0] });
 
         output.has_triangle_0 = true;
         output.triangle_0.v0 = triangle.v0;
@@ -201,9 +219,11 @@ static struct clip_triangle_output clip_triangle(struct clip_triangle_context ct
         break;
     }
     case 0b111:
+        ctx.preallocated_varyings->free_head -= 2;
         break;
     }
 
+    assert(ctx.preallocated_varyings->free_head <= PREALLOCATED_VARYINGS_SIZE);
     return output;
 }
  
@@ -283,10 +303,6 @@ struct mcc_pixel_params {
 };
 
 typedef bool (*mcc_polygon_filter_fn)(const struct mcc_barycentric_coords *coords);
-
-typedef struct {
-    union mcc_cpurast_shaders_varying *v[PREALLOCATED_VARYINGS_SIZE];
-} preallocated_varyings_t;
 
 struct mcc_rasterization_context {
     enum mcc_cpurast_culling_mode culling_mode;
@@ -598,6 +614,7 @@ static void rasterize_triangle_before_clipping(const struct mcc_rasterization_co
         for (size_t primitive_i = 0; primitive_i < sub_primitive_size; primitive_i++) {
             auto clip_output = clip_triangle((struct clip_triangle_context){
                 .varyings_count = r_context->varying_count,
+                .preallocated_varyings = r_context->r_preallocated_varyings,
                 .triangle = sub_primitive[primitive_i],
                 .plane = clipping_planes[plane_i],
             });
@@ -723,6 +740,7 @@ void mcc_cpurast_render(const struct mcc_cpurast_render_config *r_config) {
             break;
         }
         
+        preallocated_varyings.free_head = 3;
         rasterize_triangle_before_clipping(&context);
     }
 
