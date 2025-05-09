@@ -5,7 +5,6 @@
 #include <stdint.h>
 
 #define MCC_CHUNK_WIDTH 16
-#define MCC_CHUNK_HEIGHT 256
 
 typedef uint64_t mcc_world_seed_t;
 
@@ -19,11 +18,11 @@ enum mcc_block_type: uint8_t {
 };
 
 struct mcc_chunk_data {
-    enum mcc_block_type blocks[MCC_CHUNK_WIDTH*MCC_CHUNK_WIDTH*MCC_CHUNK_HEIGHT];
+    enum mcc_block_type blocks[MCC_CHUNK_WIDTH*MCC_CHUNK_WIDTH*MCC_CHUNK_WIDTH];
     /**
      * Posision of the chunk in chunk coordinates (global coordinates / MCC_CHUNK_WIDTH)
      */
-    size_t x, z;
+    size_t x, y, z;
 };
 
 inline static bool mcc_block_is_transparent(enum mcc_block_type bt) {
@@ -42,7 +41,7 @@ inline static bool mcc_block_is_transparent(enum mcc_block_type bt) {
 
 inline static size_t mcc_chunk_block_idx(size_t x, size_t y, size_t z) {
     assert(x < MCC_CHUNK_WIDTH);
-    assert(y < MCC_CHUNK_HEIGHT);
+    assert(y < MCC_CHUNK_WIDTH);
     assert(z < MCC_CHUNK_WIDTH);
     return x + z * MCC_CHUNK_WIDTH + y * MCC_CHUNK_WIDTH * MCC_CHUNK_WIDTH;
 }

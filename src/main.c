@@ -42,6 +42,7 @@ int main() {
     // Generate a chunk with seed 0
     struct mcc_chunk_data chunk_data = {
         .x = 0,
+        .y = 0,
         .z = 0
     };
     {

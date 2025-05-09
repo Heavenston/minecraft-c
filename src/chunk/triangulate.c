@@ -190,7 +190,7 @@ struct chunk_meshing_faces {
      * For each block, assigns a bit for each face for wether it is not
      * obstructed and so wether a mesh surface should be put.
      */
-    uint8_t to_mesh_faces[MCC_CHUNK_WIDTH*MCC_CHUNK_WIDTH*MCC_CHUNK_HEIGHT];
+    uint8_t to_mesh_faces[MCC_CHUNK_WIDTH*MCC_CHUNK_WIDTH*MCC_CHUNK_WIDTH];
 };
 
 struct block_face_data {
@@ -252,7 +252,7 @@ size_t size_t_signed_add(size_t val, ssize_t diff) {
 void mcc_chunk_mesh_create(struct mcc_chunk_mesh *r_mesh, struct mcc_chunk_data *r_chunk_data) {
     struct chunk_meshing_faces *meshing_faces = calloc(1, sizeof(*meshing_faces));
 
-    for (size_t y = 0; y < MCC_CHUNK_HEIGHT; y++) {
+    for (size_t y = 0; y < MCC_CHUNK_WIDTH; y++) {
         for (size_t z = 0; z < MCC_CHUNK_WIDTH; z++) {
             for (size_t x = 0; x < MCC_CHUNK_WIDTH; x++) {
                 size_t block_idx = mcc_chunk_block_idx(x, y, z);
@@ -267,7 +267,7 @@ void mcc_chunk_mesh_create(struct mcc_chunk_mesh *r_mesh, struct mcc_chunk_data 
                     ssize_t neighbor_z = (ssize_t)z + face->dz;
                     enum mcc_block_type neighbor_bt =
                         neighbor_x >= 0 && neighbor_x < MCC_CHUNK_WIDTH &&
-                        neighbor_y >= 0 && neighbor_y < MCC_CHUNK_HEIGHT &&
+                        neighbor_y >= 0 && neighbor_y < MCC_CHUNK_WIDTH &&
                         neighbor_z >= 0 && neighbor_z < MCC_CHUNK_WIDTH
                         ? r_chunk_data->blocks[mcc_chunk_block_idx((size_t)neighbor_x, (size_t)neighbor_y, (size_t)neighbor_z)]
                         : MCC_BLOCK_TYPE_AIR;
@@ -278,7 +278,7 @@ void mcc_chunk_mesh_create(struct mcc_chunk_mesh *r_mesh, struct mcc_chunk_data 
         }
     }
 
-    for (size_t y = 0; y < MCC_CHUNK_HEIGHT; y++) {
+    for (size_t y = 0; y < MCC_CHUNK_WIDTH; y++) {
         for (size_t z = 0; z < MCC_CHUNK_WIDTH; z++) {
             for (size_t x = 0; x < MCC_CHUNK_WIDTH; x++) {
                 size_t block_idx = mcc_chunk_block_idx(x, y, z);
@@ -334,7 +334,7 @@ void mcc_chunk_mesh_create(struct mcc_chunk_mesh *r_mesh, struct mcc_chunk_data 
                     size_t extent_y = 0;
                     while (
                         face->axis != TRIANGULATION_AXIS_Y &&
-                        y + extent_y + 1 < MCC_CHUNK_HEIGHT
+                        y + extent_y + 1 < MCC_CHUNK_WIDTH
                     ) {
                         for (size_t dx = 0; dx <= extent_x; dx++) {
                             for (size_t dz = 0; dz <= extent_z; dz++) {
