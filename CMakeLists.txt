@@ -10,9 +10,10 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Debug)
 endif()
 
-set(CMAKE_C_FLAGS "-Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wmissing-field-initializers -Wuninitialized")
+set(CMAKE_C_FLAGS "-Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wmissing-field-initializers -Wuninitialized -mavx")
 set(CMAKE_C_FLAGS_DEBUG "-g3 -O1 -fsanitize=address")
-set(CMAKE_C_FLAGS_RELEASE "-O3 -DNDEBUG -ffast-math")
+# NOTE: Some flags may be redundant/useless :D
+set(CMAKE_C_FLAGS_RELEASE "-O3 -flto -DNDEBUG -ffast-math -march=native -mtune=native -ffinite-math-only -funsafe-math-optimizations -fno-signed-zeros -fno-math-errno")
 
 file(GLOB_RECURSE PROJECT_SOURCES CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/src/*.c")
 
