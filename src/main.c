@@ -44,12 +44,24 @@ int main() {
         .x = 0,
         .z = 0
     };
-    mcc_chunk_generate(0, &chunk_data);
+    {
+        struct timespec generate_start, generate_end;
+        timespec_get(&generate_start, TIME_UTC);
+        mcc_chunk_generate(0, &chunk_data);
+        timespec_get(&generate_end, TIME_UTC);
+        printf("Generated chunk in %fms\n", (double)diff_ns(generate_start, generate_end) / 1'000'000.);
+    }
     
     // Create a mesh from the chunk data
     struct mcc_chunk_mesh chunk_mesh;
     mcc_chunk_mesh_init(&chunk_mesh);
-    mcc_chunk_mesh_create(&chunk_mesh, &chunk_data);
+    {
+        struct timespec mesh_start, mesh_end;
+        timespec_get(&mesh_start, TIME_UTC);
+        mcc_chunk_mesh_create(&chunk_mesh, &chunk_data);
+        timespec_get(&mesh_end, TIME_UTC);
+        printf("Meshed chunk in %fms\n", (double)diff_ns(mesh_start, mesh_end) / 1'000'000.);
+    }
     
     printf("Generated chunk mesh with %zu vertices\n", chunk_mesh.vertex_count);
     
