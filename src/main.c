@@ -8,6 +8,7 @@
 #include "chunk/triangulate.h"
 #include "chunk/shader.h"
 
+#include <string.h>
 #include <time.h>
 #include <sys/time.h>
 #include <assert.h>
@@ -70,7 +71,8 @@ int main() {
     
     const float rotation_delta = 0.1f;
 
-    bool enable_wireframe = false;
+    bool enable_wireframe = false,
+         enable_depth_rendering = false;
 
     mcc_vec3f camera_pos = {{ 6.f, 5.5f, 6.f }};
 
@@ -100,6 +102,9 @@ int main() {
                 need_redraw = true;
             } else if (event.key_press.keycode == 25 /* 'w' */) {
                 enable_wireframe = !enable_wireframe;
+                need_redraw = true;
+            } else if (event.key_press.keycode == 40 /* 'd' */) {
+                enable_depth_rendering = !enable_depth_rendering;
                 need_redraw = true;
             }
             break;
@@ -140,7 +145,7 @@ int main() {
             // Projection
             mcc_mat4f projection = mcc_mat4f_perspective(
                 (float)width / (float)height,
-                0.1f, 1000.0f,
+                0.1f, 10.0f,
                 MCC_PIf / 2.0f
             );
 
@@ -182,6 +187,20 @@ int main() {
             timespec_get(&t1, TIME_UTC);
 
             printf("Finished rendering (took %fms)!\n", (double)diff_ns(t0, t1) / 1'000'000.);
+
+            if (enable_depth_rendering) {
+                float max_depth = -1.f, min_depth = 1.f;
+                for (size_t i = 0; i < width*height; i++) {
+                    if (depth_data[i] > max_depth)
+                        max_depth = depth_data[i];
+                    if (depth_data[i] < min_depth)
+                        min_depth = depth_data[i];
+                }
+                for (size_t i = 0; i < width*height; i++) {
+                    uint8_t p = 255 - (uint8_t)(((depth_data[i] - min_depth) / (max_depth - min_depth)) * 255.f);
+                    memset(image_data + i*4, p, 4);
+                }
+            }
 
             mcc_window_put_image(window, image_data, geometry.width, geometry.height);
 
