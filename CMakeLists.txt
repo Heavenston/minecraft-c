@@ -14,6 +14,7 @@ set(CMAKE_C_FLAGS "-Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wmis
 set(CMAKE_C_FLAGS_DEBUG "-g3 -O1 -fsanitize=address")
 # NOTE: Some flags may be redundant/useless :D
 set(CMAKE_C_FLAGS_RELEASE "-O3 -flto -DNDEBUG -ffast-math -march=native -mtune=native -ffinite-math-only -funsafe-math-optimizations -fno-signed-zeros -fno-math-errno")
+set(CMAKE_C_FLAGS_PERF "-O3 -g3 -ffast-math -march=native -mtune=native -ffinite-math-only -funsafe-math-optimizations -fno-signed-zeros -fno-math-errno -fno-inline")
 
 file(GLOB_RECURSE PROJECT_SOURCES CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/src/*.c")
 

@@ -13,6 +13,7 @@
 struct processed_vertex {
     union mcc_cpurast_shaders_varying *varyings;
     mcc_vec4f pos_homogeneous;
+    float w_inv;
 };
 
 struct plane {
@@ -71,6 +72,7 @@ static struct processed_vertex clip_edge(ic_t ctx) {
         mcc_vec4f_scale(ctx.v0.pos_homogeneous, 1.f - t),
         mcc_vec4f_scale(ctx.v1.pos_homogeneous, t)
     );
+    v.w_inv = 1.f / v.pos_homogeneous.w;
     // TODO: Use pre allocated values (this is a leak)
     v.varyings = malloc(sizeof(*v.varyings) * ctx.ctctx->varyings_count);
     for (size_t vi = 0; vi < ctx.ctctx->varyings_count; vi++) {
@@ -362,8 +364,8 @@ static void draw_line(const struct mcc_rasterization_context *r_context,
     float wf = (float)r_context->r_attachment->width;
     float hf = (float)r_context->r_attachment->height;
 
-    mcc_vec3f v0_pos_euclidian = mcc_vec3f_scale(v0->pos_homogeneous.xyz, 1.f / v0->pos_homogeneous.w);
-    mcc_vec3f v1_pos_euclidian = mcc_vec3f_scale(v1->pos_homogeneous.xyz, 1.f / v1->pos_homogeneous.w);
+    mcc_vec3f v0_pos_euclidian = mcc_vec3f_scale(v0->pos_homogeneous.xyz, v0->w_inv);
+    mcc_vec3f v1_pos_euclidian = mcc_vec3f_scale(v1->pos_homogeneous.xyz, v1->w_inv);
     
     int x0 = (int)(((v0_pos_euclidian.x + 1.f) * 0.5f * wf) + 0.5f);
     int y0 = (int)(((-v0_pos_euclidian.y + 1.f) * 0.5f * hf) + 0.5f);
@@ -467,9 +469,9 @@ static void process_fragment(const struct mcc_rasterization_context *r_context, 
     // Interpolation of varying attributes
     for (size_t varying_i = 0; varying_i < r_context->varying_count; varying_i++) {
         // Get the w-coordinate from each vertex (reciprocal of the homogeneous 4th component)
-        float w0 = 1.0f / primitive->v0.pos_homogeneous.w;
-        float w1 = 1.0f / primitive->v1.pos_homogeneous.w;
-        float w2 = 1.0f / primitive->v2.pos_homogeneous.w;
+        float w0 = primitive->v0.w_inv;
+        float w1 = primitive->v1.w_inv;
+        float w2 = primitive->v2.w_inv;
         
         float w_interpolated = barycentric->w * w0 + barycentric->u * w1 + barycentric->v * w2;
         float correction = 1.0f / w_interpolated;
@@ -513,9 +515,9 @@ static void rasterize_triangle_after_clipping(const struct mcc_rasterization_con
     primitive_t *primitive = r_context->r_primitive;
 
     // Get vertex positions
-    mcc_vec3f v0 = mcc_vec3f_scale(primitive->v0.pos_homogeneous.xyz, 1.f / primitive->v0.pos_homogeneous.w),
-              v1 = mcc_vec3f_scale(primitive->v1.pos_homogeneous.xyz, 1.f / primitive->v1.pos_homogeneous.w),
-              v2 = mcc_vec3f_scale(primitive->v2.pos_homogeneous.xyz, 1.f / primitive->v2.pos_homogeneous.w);
+    mcc_vec3f v0 = mcc_vec3f_scale(primitive->v0.pos_homogeneous.xyz, primitive->v0.w_inv),
+              v1 = mcc_vec3f_scale(primitive->v1.pos_homogeneous.xyz, primitive->v1.w_inv),
+              v2 = mcc_vec3f_scale(primitive->v2.pos_homogeneous.xyz, primitive->v2.w_inv);
     mcc_vec2f p0 = v0.xy,
               p1 = v1.xy,
               p2 = v2.xy;
@@ -724,6 +726,7 @@ void mcc_cpurast_render(const struct mcc_cpurast_render_config *r_config) {
             vert_input.r_out_varyings = pv->varyings;
             r_config->r_vertex_shader->r_fn(&vert_input);
             pv->pos_homogeneous = vert_input.out_position;
+            pv->w_inv = 1.f / pv->pos_homogeneous.w;
         }
         break;
     }
@@ -750,6 +753,7 @@ void mcc_cpurast_render(const struct mcc_cpurast_render_config *r_config) {
                 vert_input.r_out_varyings = primitive.vertices[di].varyings;
                 r_config->r_vertex_shader->r_fn(&vert_input);
                 primitive.vertices[di].pos_homogeneous = vert_input.out_position;
+                primitive.vertices[di].w_inv = 1.f / primitive.vertices[di].pos_homogeneous.w;
             }
             break;
         case MCC_CPURAST_VERTEX_PROCESSING_TRIANGLE_STRIP:
@@ -763,6 +767,7 @@ void mcc_cpurast_render(const struct mcc_cpurast_render_config *r_config) {
             vert_input.r_out_varyings = primitive.v2.varyings;
             r_config->r_vertex_shader->r_fn(&vert_input);
             primitive.v2.pos_homogeneous = vert_input.out_position;
+            primitive.v2.w_inv = 1.f / primitive.v2.pos_homogeneous.w;
             break;
         }
         
