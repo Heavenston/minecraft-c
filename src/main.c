@@ -122,6 +122,9 @@ int main() {
         }
         
         if (need_redraw) {
+            struct timespec render_start, render_end;
+            timespec_get(&render_start, TIME_UTC);
+
             auto geometry = mcc_window_get_geometry(window);
 
             size_t height = safe_to_size_t(geometry.height),
@@ -180,13 +183,7 @@ int main() {
 
             // Render the chunk
             mcc_cpurast_clear(&clear_config);
-
-            struct timespec t0, t1;
-            timespec_get(&t0, TIME_UTC);
             mcc_cpurast_render(&render_config);
-            timespec_get(&t1, TIME_UTC);
-
-            printf("Finished rendering (took %fms)!\n", (double)diff_ns(t0, t1) / 1'000'000.);
 
             if (enable_depth_rendering) {
                 float max_depth = -1.f, min_depth = 1.f;
@@ -208,6 +205,9 @@ int main() {
             mcc_chunk_render_config_cleanup(&render_config);
             free(image_data);
             free(depth_data);
+
+            timespec_get(&render_end, TIME_UTC);
+            printf("Finished rendering (took %fms)!\n", (double)diff_ns(render_start, render_end) / 1'000'000.);
         }
     }
 
