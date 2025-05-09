@@ -59,7 +59,7 @@ struct face_mesh {
     size_t start_idx;
     float32_t x, y, z;
     float32_t extent_x, extent_y, extent_z;
-    bool clockwise; // Controls winding order of the face
+    bool swap_winding;
 };
 
 /**
@@ -121,8 +121,7 @@ static inline void append_face_x(struct face_mesh fm) {
     mesh->positions[si+5] = (mcc_vec3f){{ x, y+fm.extent_y, z+fm.extent_z }};
     mesh->texcoords[si+5] = (mcc_vec2f){{ fm.extent_z, fm.extent_y }};
 
-    // If clockwise is requested, swap vertices to reverse winding order
-    if (fm.clockwise) {
+    if (!fm.swap_winding) {
         swap_winding(mesh, si);
     }
 }
@@ -147,8 +146,7 @@ static inline void append_face_z(struct face_mesh fm) {
     mesh->positions[si+5] = (mcc_vec3f){{ x+fm.extent_x, y+fm.extent_y, z }};
     mesh->texcoords[si+5] = (mcc_vec2f){{ fm.extent_x, fm.extent_y }};
 
-    // If clockwise is requested, swap vertices to reverse winding order
-    if (!fm.clockwise) {
+    if (fm.swap_winding) {
         swap_winding(mesh, si);
     }
 }
@@ -173,8 +171,7 @@ static inline void append_face_y(struct face_mesh fm) {
     mesh->positions[si+5] = (mcc_vec3f){{ x+fm.extent_x, y, z+fm.extent_z }};
     mesh->texcoords[si+5] = (mcc_vec2f){{ fm.extent_x, fm.extent_z }};
     
-    // If clockwise is requested, swap vertices to reverse winding order
-    if (fm.clockwise) {
+    if (!fm.swap_winding) {
         swap_winding(mesh, si);
     }
 }
@@ -369,7 +366,7 @@ void mcc_chunk_mesh_create(struct mcc_chunk_mesh *r_mesh, struct mcc_chunk_data 
                         .extent_x = (float)(extent_x + 1),
                         .extent_y = (float)(extent_y + 1),
                         .extent_z = (float)(extent_z + 1),
-                        .clockwise = !face->is_negative,
+                        .swap_winding = !face->is_negative,
                     };
                     add_vertices(r_mesh, 6);
 

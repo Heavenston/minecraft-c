@@ -37,10 +37,26 @@ struct clip_triangle_output {
     primitive_t triangle_1;
 };
 
+
+const struct plane clipping_planes[] = {
+    { .normal = (mcc_vec4f){{ +0.f, +0.f, +1.f, +1.f }}, .D = +0.00f },
+    { .normal = (mcc_vec4f){{ +0.f, +0.f, -1.f, +1.f }}, .D = +0.00f },
+
+    // NOTE: Clipping -x +x -y +y seems useless as said by lisyarus's blog
+    //       but does it have any advantage ??
+    // { .normal = (mcc_vec4f){{ +0.f, +1.f, +0.f, +1.f }}, .D = +0.00f },
+    // { .normal = (mcc_vec4f){{ +0.f, -1.f, +0.f, +1.f }}, .D = +0.00f },
+
+    // { .normal = (mcc_vec4f){{ +1.f, +0.f, +0.f, +1.f }}, .D = +0.00f },
+    // { .normal = (mcc_vec4f){{ -1.f, +0.f, +0.f, +1.f }}, .D = +0.00f },
+};
+
 /**
  * Maximum number of triangles after clipping a single triangle
+ * Defined as the 2^(the number of clipping planes)
+ * (because each clipping plane may didive each triangle in two)
  */
-#define MAX_SUBTRIANGLES 4
+#define MAX_SUBTRIANGLES (1UL << (sizeof(clipping_planes) / sizeof(*clipping_planes)))
 /**
  * Number of varyings to allocate at the start of rasterization.
  */
@@ -244,19 +260,6 @@ bool mcc_depth_comparison_fn_neq(float previous, float new) {
     return new != previous;
 }
 
-/**
- * Computes `det(v1 - v0, point - v0) > 0.f`
- * Used to test point lies on the left side of a line
- */
-static bool check_point(mcc_vec2f p, mcc_vec2f v0, mcc_vec2f v1) {
-    mcc_vec2f c0 = mcc_vec2f_sub(v1, v0);
-    
-    mcc_vec2f c1 = mcc_vec2f_sub(p, v0);
-    float det = mcc_mat2f_det(mcc_mat2f_col(c0, c1));
-
-    return det > 0.f;
-}
-
 struct mcc_barycentric_coords {
     /**
      * Weight for v1
@@ -267,60 +270,10 @@ struct mcc_barycentric_coords {
      */
     float v;
     /**
-     * Weight for v0 (calculated as 1 - u - v)
+     * Weight for v0
      */
     float w;
-    /**
-     * True if the point is inside or on the boundary
-     */
-    bool isInside;
 };
-
-/**
- * Calculates Barycentric coordinates (u, v, w) for screenPos relative to
- * triangle (v0, v1, v2).
- * P = w*v0 + u*v1 + v*v2
- * where u >= 0, v >= 0, w >= 0 (or u + v <= 1) for points inside the triangle.
- */
-static struct mcc_barycentric_coords mcc_calculate_barycentric(mcc_vec2f v0, mcc_vec2f v1, mcc_vec2f v2, mcc_vec2f screenPos) {
-    struct mcc_barycentric_coords result = {};
-
-    // Compute vectors        
-    mcc_vec2f v0v1 = mcc_vec2f_sub(v1, v0);
-    mcc_vec2f v0v2 = mcc_vec2f_sub(v2, v0);
-    mcc_vec2f v0p = mcc_vec2f_sub(screenPos, v0);
-    
-    // Compute area of the triangle using cross product
-    float area = v0v1.x * v0v2.y - v0v1.y * v0v2.x;
-    if (fabsf(area) < 1e-7f) {
-        // Triangle is degenerate, cannot calculate barycentric coordinates reliably
-        return result;
-    }
-    
-    // Compute barycentric coordinates directly using vector cross products
-    float invArea = 1.0f / area;
-    
-    // The u coordinate (weight for v1)
-    float crossPV2 = v0p.x * v0v2.y - v0p.y * v0v2.x;
-    result.u = crossPV2 * invArea;
-    
-    // The v coordinate (weight for v2)
-    float crossV1P = v0v1.x * v0p.y - v0v1.y * v0p.x;
-    result.v = crossV1P * invArea;
-    
-    // The w coordinate (weight for v0)
-    result.w = 1.0f - result.u - result.v;
-    
-    // Check if the point is inside the triangle (including boundaries)
-    float epsilon = 1e-7f;
-    if (result.u >= -epsilon && result.v >= -epsilon && result.w >= -epsilon) {
-        result.isInside = true;
-    } else {
-        result.isInside = false;
-    }
-    
-    return result;
-}
 
 struct mcc_pixel_params {
     struct mcc_barycentric_coords barycentric;
@@ -408,7 +361,6 @@ static void draw_line(const struct mcc_rasterization_context *r_context,
                 .u = t,
                 .v = 0.0f,
                 .w = 1.0f - t,
-                .isInside = true
             };
             
             float depth = v0_pos_euclidian.z * (1.0f - t) + v1_pos_euclidian.z * t;
@@ -468,26 +420,25 @@ static void process_fragment(const struct mcc_rasterization_context *r_context, 
     
     // Interpolation of varying attributes
     for (size_t varying_i = 0; varying_i < r_context->varying_count; varying_i++) {
-        // Get the w-coordinate from each vertex (reciprocal of the homogeneous 4th component)
-        float w0 = primitive->v0.w_inv;
-        float w1 = primitive->v1.w_inv;
-        float w2 = primitive->v2.w_inv;
+        float w0             = primitive->v0.w_inv,
+              w1             = primitive->v1.w_inv,
+              w2             = primitive->v2.w_inv,
+              w_interpolated = barycentric->w * w0 + barycentric->u * w1 + barycentric->v * w2,
+              correction     = 1.0f / w_interpolated;
+        // TEMP: Disables perspective correction
+        // correction = 1.f;
         
-        float w_interpolated = barycentric->w * w0 + barycentric->u * w1 + barycentric->v * w2;
-        float correction = 1.0f / w_interpolated;
-        
-        mcc_vec4f var0 = primitive->v0.varyings[varying_i].vec4f;
-        mcc_vec4f var1 = primitive->v1.varyings[varying_i].vec4f;
-        mcc_vec4f var2 = primitive->v2.varyings[varying_i].vec4f;
-        
-        mcc_vec4f result;
-        for (int i = 0; i < 4; i++) {
-            result.components[i] = correction * (
-                barycentric->w * var0.components[i] * w0 +
-                barycentric->u * var1.components[i] * w1 +
-                barycentric->v * var2.components[i] * w2
-            );
-        }
+        mcc_vec4f var0 = primitive->v0.varyings[varying_i].vec4f,
+                  var1 = primitive->v1.varyings[varying_i].vec4f,
+                  var2 = primitive->v2.varyings[varying_i].vec4f;
+
+        mcc_vec4f result = mcc_vec4f_add(
+            mcc_vec4f_add(
+                mcc_vec4f_scale(var0, barycentric->w * w0 * correction),
+                mcc_vec4f_scale(var1, barycentric->u * w1 * correction)
+            ),
+            mcc_vec4f_scale(var2, barycentric->v * w2 * correction)
+        );
         
         r_context->r_fragment_varyings[varying_i].vec4f = result;
     }
@@ -522,7 +473,12 @@ static void rasterize_triangle_after_clipping(const struct mcc_rasterization_con
               p1 = v1.xy,
               p2 = v2.xy;
 
-    bool isCcw = check_point(p2, p0, p1);
+    mcc_vec2f p1p0 = mcc_vec2f_sub(p1, p0);
+    mcc_vec2f p2p1 = mcc_vec2f_sub(p2, p1);
+    mcc_vec2f p0p2 = mcc_vec2f_sub(p0, p2);
+    float det012 = mcc_mat2f_det(mcc_mat2f_col(mcc_vec2f_sub(p1, p0), mcc_vec2f_sub(p2, p0)));
+
+    bool isCcw = det012 < 0.f;
 
     if ((r_context->culling_mode == MCC_CPURAST_CULLING_MODE_CW && isCcw) ||
         (r_context->culling_mode == MCC_CPURAST_CULLING_MODE_CCW && !isCcw))
@@ -575,19 +531,28 @@ static void rasterize_triangle_after_clipping(const struct mcc_rasterization_con
         for (uint32_t x = min_x; x < max_x; x++) {
             size_t pixel_idx = x + y * r_context->r_attachment->width;
 
-            float fx = (float)x + 0.5f,
-                  fy = (float)y + 0.5f;
+            const float fx = (float)x + 0.5f,
+                        fy = (float)y + 0.5f;
 
             // Normalized screen coordinates
-            mcc_vec2f screen_pos = {{
+            const mcc_vec2f screen_pos = {{
                 fx * 2.f / wf - 1.f,
                 fy *-2.f / hf + 1.f,
             }};
 
             // Calculate barycentric coordinates
-            auto barycentric = mcc_calculate_barycentric(p0, p1, p2, screen_pos);
-            if (!barycentric.isInside)
+            const float det01p = mcc_mat2f_det(mcc_mat2f_col(p1p0, mcc_vec2f_sub(screen_pos, p0)));
+            const float det12p = mcc_mat2f_det(mcc_mat2f_col(p2p1, mcc_vec2f_sub(screen_pos, p1)));
+            const float det20p = mcc_mat2f_det(mcc_mat2f_col(p0p2, mcc_vec2f_sub(screen_pos, p2)));
+
+            const bool isInside = det01p >= 0.f && det12p >= 0.f && det20p >= 0.f;
+            if (!isInside)
                 continue;
+            const struct mcc_barycentric_coords barycentric = {
+                .u = det20p / det012,
+                .v = det01p / det012,
+                .w = det12p / det012,
+            };
             
             // Apply polygon mode filter (fill, point)
             if (!r_context->polygon_filter(&barycentric))
@@ -625,20 +590,7 @@ static void rasterize_triangle_before_clipping(const struct mcc_rasterization_co
     sub_primitive[sub_primitive_size++] = *r_context->r_primitive;
     assert(sub_primitive_size <= MAX_SUBTRIANGLES);
 
-    struct plane planes[] = {
-        { .normal = (mcc_vec4f){{ +0.f, +0.f, +1.f, +1.f }}, .D = +0.00f },
-        { .normal = (mcc_vec4f){{ +0.f, +0.f, -1.f, +1.f }}, .D = +0.00f },
-
-        // NOTE: Clipping -x +x -y +y seems useless as said by lisyarus's blog
-        //       but does it have any advantage ??
-        // { .normal = (mcc_vec4f){{ +0.f, +1.f, +0.f, +1.f }}, .D = +0.00f },
-        // { .normal = (mcc_vec4f){{ +0.f, -1.f, +0.f, +1.f }}, .D = +0.00f },
-
-        // { .normal = (mcc_vec4f){{ +1.f, +0.f, +0.f, +1.f }}, .D = +0.00f },
-        // { .normal = (mcc_vec4f){{ -1.f, +0.f, +0.f, +1.f }}, .D = +0.00f },
-    };
-
-    for (size_t plane_i = 0; plane_i < sizeof(planes) / sizeof(*planes); plane_i++) {
+    for (size_t plane_i = 0; plane_i < sizeof(clipping_planes) / sizeof(*clipping_planes); plane_i++) {
         // Temp array for clipped triangles
         primitive_t sub_primitive_out[MAX_SUBTRIANGLES];
         size_t sub_primitive_out_size = 0;
@@ -647,7 +599,7 @@ static void rasterize_triangle_before_clipping(const struct mcc_rasterization_co
             auto clip_output = clip_triangle((struct clip_triangle_context){
                 .varyings_count = r_context->varying_count,
                 .triangle = sub_primitive[primitive_i],
-                .plane = planes[plane_i],
+                .plane = clipping_planes[plane_i],
             });
             if (clip_output.has_triangle_0)
                 sub_primitive_out[sub_primitive_out_size++] = clip_output.triangle_0;

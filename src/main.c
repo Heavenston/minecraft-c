@@ -161,7 +161,7 @@ int main() {
             // Projection
             mcc_mat4f projection = mcc_mat4f_perspective(
                 (float)width / (float)height,
-                0.1f, 10.0f,
+                0.1f, 20.0f,
                 MCC_PIf / 2.0f
             );
 
