@@ -623,7 +623,7 @@ static void rasterize_triangle_before_clipping(const struct mcc_rasterization_co
     size_t sub_primitive_size = 0;
     primitive_t sub_primitive[MAX_SUBTRIANGLES];
     sub_primitive[sub_primitive_size++] = *r_context->r_primitive;
-    assert(sub_primitive_size < MAX_SUBTRIANGLES);
+    assert(sub_primitive_size <= MAX_SUBTRIANGLES);
 
     struct plane planes[] = {
         { .normal = (mcc_vec4f){{ +0.f, +0.f, +1.f, +1.f }}, .D = +0.00f },
@@ -651,17 +651,17 @@ static void rasterize_triangle_before_clipping(const struct mcc_rasterization_co
             });
             if (clip_output.has_triangle_0)
                 sub_primitive_out[sub_primitive_out_size++] = clip_output.triangle_0;
-            assert(sub_primitive_out_size < MAX_SUBTRIANGLES);
+            assert(sub_primitive_out_size <= MAX_SUBTRIANGLES);
             if (clip_output.has_triangle_1)
                 sub_primitive_out[sub_primitive_out_size++] = clip_output.triangle_1;
-            assert(sub_primitive_out_size < MAX_SUBTRIANGLES);
+            assert(sub_primitive_out_size <= MAX_SUBTRIANGLES);
         }
 
         memcpy(sub_primitive, sub_primitive_out, sizeof(sub_primitive));
         sub_primitive_size = sub_primitive_out_size;
     }
 
-    assert(sub_primitive_size < MAX_SUBTRIANGLES);
+    assert(sub_primitive_size <= MAX_SUBTRIANGLES);
     for (size_t primitive_i = 0; primitive_i < sub_primitive_size; primitive_i++) {
         sub_context.r_primitive = &sub_primitive[primitive_i];
         rasterize_triangle_after_clipping(&sub_context);
