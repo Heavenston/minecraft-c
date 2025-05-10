@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <stdbit.h>
 #include <limits.h>
+#include <__stddef_unreachable.h>
 
 /**
  * Equivalent to C++'s `std::bit_width` function
@@ -20,3 +21,12 @@
 #define mcc_next_pow_of_2(VAL) (1UL << mcc_bit_width(VAL))
 #define mcc_round_up_pow_of_2(VAL) (mcc_is_pow_of_2(VAL) ? VAL : mcc_next_pow_of_2(VAL))
 
+#ifndef NDEBUG
+#define mcc_unreachable() do { panic("Reached unreachable"); } while(false)
+#else
+#define mcc_unreachable() unreachable()
+#endif
+
+void panic(const char *str);
+
+void shuffle(size_t n, size_t arr[n]);

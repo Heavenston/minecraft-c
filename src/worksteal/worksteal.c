@@ -4,15 +4,17 @@
 #include <assert.h>
 #include <stdatomic.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 void mcc_worksteal_queue_init(struct mcc_worksteal_queue *queue, size_t capacity) {
-    queue->bottom = 0;
-    queue->top = 0;
+    atomic_init(&queue->bottom, 0);
+    atomic_init(&queue->top, 0);
 
-    queue->array = malloc(sizeof(*queue->array) + sizeof(mcc_worksteal_data_type_t) * capacity);
-    assert(queue->array != NULL);
-    queue->array->capacity = capacity;
+    struct mcc_worksteal_array *array = malloc(sizeof(*array) + sizeof(mcc_worksteal_data_type_t) * capacity);
+    assert(array != NULL);
+    atomic_init(&array->capacity, capacity);
+    atomic_init(&queue->array, array);
 }
 
 void mcc_worksteal_queue_resize(struct mcc_worksteal_queue *queue, size_t target_capacity) {
@@ -33,28 +35,32 @@ void mcc_worksteal_queue_resize(struct mcc_worksteal_queue *queue, size_t target
     free(old_data);
 }
 
-enum mcc_worksteal_result mcc_worksteal_queue_take(struct mcc_worksteal_queue *q, mcc_worksteal_data_type_t *out) {
-    size_t b = atomic_load_explicit(&q->bottom, memory_order_relaxed) - 1;
+enum mcc_worksteal_take_result mcc_worksteal_queue_take(struct mcc_worksteal_queue *q, mcc_worksteal_data_type_t *out) {
+    size_t b = atomic_load_explicit(&q->bottom, memory_order_relaxed);
+    // NOTE: Not in the paper but bottom=0 causes a bug (because of the overflow? I dont understand why its not addressed in the paper so maybe its my fault)
+    if (b == 0)
+        return MCC_WORKSTEAL_TAKE_RESULT_EMPTY;
+    b -= 1;
     struct mcc_worksteal_array *a = atomic_load_explicit(&q->array, memory_order_relaxed);
     atomic_store_explicit(&q->bottom, b, memory_order_relaxed);
     atomic_thread_fence(memory_order_seq_cst);
     size_t t = atomic_load_explicit(&q->top, memory_order_relaxed);
 
-    enum mcc_worksteal_result result;
+    enum mcc_worksteal_take_result result;
     if (t <= b) {
         /* Non-empty queue. */
         *out = atomic_load_explicit(&a->data[b % a->capacity], memory_order_relaxed);
-        result = MCC_WORKSTEAL_RESULT_SUCCESS;
+        result = MCC_WORKSTEAL_TAKE_RESULT_SUCCESS;
         if (t == b) {
             /* Single last element in queue. */
             if (!atomic_compare_exchange_strong_explicit(&q->top, &t, t + 1, memory_order_seq_cst, memory_order_relaxed)) {
                 /* Failed race. */
-                result = MCC_WORKSTEAL_RESULT_EMPTY;
+                result = MCC_WORKSTEAL_TAKE_RESULT_EMPTY;
             }
             atomic_store_explicit(&q->bottom, b + 1, memory_order_relaxed);
         }
     } else { /* Empty queue. */
-        result = MCC_WORKSTEAL_RESULT_EMPTY;
+        result = MCC_WORKSTEAL_TAKE_RESULT_EMPTY;
         atomic_store_explicit(&q->bottom, b + 1, memory_order_relaxed);
     }
     return result;
@@ -73,20 +79,20 @@ void mcc_worksteal_queue_push(struct mcc_worksteal_queue *q, mcc_worksteal_data_
     atomic_store_explicit(&q->bottom, b + 1, memory_order_relaxed);
 }
 
-enum mcc_worksteal_result mcc_worksteal_queue_steal(struct mcc_worksteal_queue *q, mcc_worksteal_data_type_t *out) {
+enum mcc_worksteal_steal_result mcc_worksteal_queue_steal(struct mcc_worksteal_queue *q, mcc_worksteal_data_type_t *out) {
     size_t t = atomic_load_explicit(&q->top, memory_order_acquire);
     atomic_thread_fence(memory_order_seq_cst);
     size_t b = atomic_load_explicit(&q->bottom, memory_order_acquire);
 
-    enum mcc_worksteal_result result = MCC_WORKSTEAL_RESULT_EMPTY;
+    enum mcc_worksteal_steal_result result = MCC_WORKSTEAL_STEAL_RESULT_EMPTY;
     if (t < b) {
         /* Non-empty queue. */
         struct mcc_worksteal_array *a = atomic_load_explicit(&q->array, memory_order_consume);
         *out = atomic_load_explicit(&a->data[t % a->capacity], memory_order_relaxed);
-        result = MCC_WORKSTEAL_RESULT_SUCCESS;
+        result = MCC_WORKSTEAL_STEAL_RESULT_SUCCESS;
         if (!atomic_compare_exchange_strong_explicit(&q->top, &t, t + 1, memory_order_seq_cst, memory_order_relaxed)) {
             /* Failed race. */
-            return MCC_WORKSTEAL_RESULT_ABORT;
+            return MCC_WORKSTEAL_STEAL_RESULT_ABORT;
         }
     }
     return result;

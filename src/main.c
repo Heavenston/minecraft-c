@@ -7,6 +7,7 @@
 #include "chunk/chunk.h"
 #include "chunk/triangulate.h"
 #include "chunk/shader.h"
+#include "worksteal/thread_pool.h"
 
 #include <string.h>
 #include <time.h>
@@ -14,6 +15,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 // Key definitions for XCB
 #define KEY_LEFT 113
