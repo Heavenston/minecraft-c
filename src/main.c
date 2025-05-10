@@ -14,6 +14,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 // Key definitions for XCB
 #define KEY_LEFT 113
