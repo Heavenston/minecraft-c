@@ -142,6 +142,8 @@ struct mcc_cpurast_render_config {
      * - FILL (default): fills entire triangles
      * - LINE: only renders triangle edges (wireframe)
      * - POINT: only renders triangle vertices
+     *
+     * WARNING: IGNORED, for now, always in FILL mode.
      */
     enum mcc_cpurast_polygon_mode polygon_mode;
     /**

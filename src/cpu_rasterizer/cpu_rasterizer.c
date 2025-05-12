@@ -9,18 +9,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/**
- * Like processed_vertex but for storage inside congiguous primitive buffer
- */
-struct processed_vertex_inline {
-    mcc_vec4f pos_homogeneous;
-    mcc_vec2f pos_clipspace;
-    /**
-     * Flexible array member for the n number of varyings
-     */
-    mcc_vec4f varyings[];
-};
-
 struct processed_vertex {
     union mcc_cpurast_shaders_varying *varyings;
     mcc_vec4f pos_homogeneous;
@@ -330,7 +318,6 @@ struct mcc_triangle_clip_context {
 
 struct mcc_rasterization_context {
     enum mcc_cpurast_culling_mode culling_mode;
-    preallocated_varyings_t *r_preallocated_varyings;
     struct mcc_cpurast_rendering_attachment *r_attachment;
     primitive_t *r_primitive;
     union mcc_cpurast_shaders_varying *r_fragment_varyings;
@@ -526,9 +513,31 @@ static struct clip_triangle_output clip_triangle(struct mcc_triangle_clip_contex
     return output;
 }
 
-void mcc_cpurast_render(const struct mcc_cpurast_render_config *r_config) {
-    assert(r_config->r_fragment_shader->varying_count == r_config->r_vertex_shader->varying_count);
-    size_t varying_count = r_config->r_vertex_shader->varying_count;
+struct vertex_process_task_data {
+    void *o_fragment_shader_data;
+    struct mcc_fragment_shader *r_fragment_shader;
+    void *o_vertex_shader_data;
+    struct mcc_vertex_shader *r_vertex_shader;
+
+    enum mcc_cpurast_vertex_processing vertex_processing;
+
+    uint32_t vertex_start_idx;
+    uint32_t vertex_count;
+
+    /**
+     * Buffer where to store all proccessed and clipped triangles
+     * must be of at least `vertex_count * MAX_SUBTRIANGLES * (varying_count + 1)` size
+     */
+    mcc_vec4f *r_out_primitive_buffer;
+    size_t out_vertex_count;
+};
+
+static void vertex_process_task(void *r_void_data) {
+    struct vertex_process_task_data *r_data = r_void_data;
+    assert(r_data != NULL);
+
+    assert(r_data->r_fragment_shader->varying_count == r_data->r_vertex_shader->varying_count);
+    size_t varying_count = r_data->r_vertex_shader->varying_count;
 
     preallocated_varyings_t preallocated_varyings;
     for (size_t i = 0; i < PREALLOCATED_VARYINGS_SIZE; i++) {
@@ -540,23 +549,18 @@ void mcc_cpurast_render(const struct mcc_cpurast_render_config *r_config) {
         { .varyings = preallocated_varyings.v[1] },
         { .varyings = preallocated_varyings.v[2] },
     }};
-    union mcc_cpurast_shaders_varying *fragment_varyings = calloc(varying_count, sizeof(mcc_vec4f));
 
-    struct mcc_cpurast_fragment_shader_input frag_input = {
-        .o_in_data = r_config->o_fragment_shader_data,
-        .r_in_varyings = fragment_varyings,
-    };
     struct mcc_cpurast_vertex_shader_input vert_input = {
-        .o_in_data = r_config->o_vertex_shader_data,
+        .o_in_data = r_data->o_vertex_shader_data,
     };
 
     uint32_t vertex_idx = 0;
     uint32_t vertex_index_increment;
-
+    
     // If we are in triangle strip, the first two vertices must be processed before
     // for the next primitives, the first two vertices will be the ones from the
     // previous primitive.
-    switch (r_config->vertex_processing) {
+    switch (r_data->vertex_processing) {
     case MCC_CPURAST_VERTEX_PROCESSING_TRIANGLE_LIST:
         vertex_index_increment = 3;
         break;
@@ -567,33 +571,22 @@ void mcc_cpurast_render(const struct mcc_cpurast_render_config *r_config) {
 
             vert_input.in_vertex_idx = vertex_idx;
             vert_input.r_out_varyings = pv->varyings;
-            r_config->r_vertex_shader->r_fn(&vert_input);
+            r_data->r_vertex_shader->r_fn(&vert_input);
             pv->pos_homogeneous = vert_input.out_position;
             pv->w_inv = 1.f / pv->pos_homogeneous.w;
         }
         break;
     }
 
-    // Create rasterization context
-    struct mcc_rasterization_context context = {
-        .culling_mode = r_config->culling_mode,
-        .r_preallocated_varyings = &preallocated_varyings,
-        .r_attachment = r_config->r_attachment,
-        .r_primitive = &primitive,
-        .r_fragment_varyings = fragment_varyings,
-        .r_frag_input = &frag_input,
-        .r_fragment_shader = r_config->r_fragment_shader,
-        .o_depth_comparison_fn = r_config->o_depth_comparison_fn,
-        .varying_count = varying_count,
-    };
+    size_t output_counter = 0;
 
-    for (; vertex_idx < r_config->vertex_count; vertex_idx += vertex_index_increment) {
-        switch (r_config->vertex_processing) {
+    for (; vertex_idx < r_data->vertex_count; vertex_idx += vertex_index_increment) {
+        switch (r_data->vertex_processing) {
         case MCC_CPURAST_VERTEX_PROCESSING_TRIANGLE_LIST:
             for (size_t di = 0; di < 3; di++) {
                 vert_input.in_vertex_idx = vertex_idx + safe_to_u32(di);
                 vert_input.r_out_varyings = primitive.vertices[di].varyings;
-                r_config->r_vertex_shader->r_fn(&vert_input);
+                r_data->r_vertex_shader->r_fn(&vert_input);
                 primitive.vertices[di].pos_homogeneous = vert_input.out_position;
                 primitive.vertices[di].w_inv = 1.f / primitive.vertices[di].pos_homogeneous.w;
             }
@@ -607,7 +600,7 @@ void mcc_cpurast_render(const struct mcc_cpurast_render_config *r_config) {
 
             vert_input.in_vertex_idx = vertex_idx;
             vert_input.r_out_varyings = primitive.v2.varyings;
-            r_config->r_vertex_shader->r_fn(&vert_input);
+            r_data->r_vertex_shader->r_fn(&vert_input);
             primitive.v2.pos_homogeneous = vert_input.out_position;
             primitive.v2.w_inv = 1.f / primitive.v2.pos_homogeneous.w;
             break;
@@ -620,14 +613,109 @@ void mcc_cpurast_render(const struct mcc_cpurast_render_config *r_config) {
             .r_preallocated_varyings = &preallocated_varyings,
         });
 
-        for (size_t si = 0; si < clipped_output.triangle_count; si++) {
-            context.r_primitive = &clipped_output.triangles[si];
-            rasterize_triangle(&context);
+        for (size_t triangle_i = 0; triangle_i < clipped_output.triangle_count; triangle_i++) {
+            for (size_t vertex_i = 0; vertex_i < 3; vertex_i++) {
+                r_data->r_out_primitive_buffer[output_counter++] = clipped_output.triangles[triangle_i].vertices[vertex_i].pos_homogeneous;
+                for (size_t varying_i = 0; varying_i < varying_count; varying_i++) {
+                    r_data->r_out_primitive_buffer[output_counter++] = clipped_output.triangles[triangle_i].vertices[vertex_i].varyings[varying_i].vec4f;
+                }
+            }
         }
     }
+
+    r_data->out_vertex_count = output_counter / (varying_count + 1);
+
+    for (size_t i = 0; i < PREALLOCATED_VARYINGS_SIZE; i++) {
+        free(preallocated_varyings.v[i]);
+    }
+}
+
+void mcc_cpurast_render(const struct mcc_cpurast_render_config *r_config) {
+    assert(r_config->r_fragment_shader->varying_count == r_config->r_vertex_shader->varying_count);
+    size_t varying_count = r_config->r_vertex_shader->varying_count;
+
+    // TODO: For very big meshes if would make sense to break it down into
+    //       batches?
+    // One element for vertex position, and one for each additional varying,
+    // and all of that for each vertex
+    mcc_vec4f *primitive_buffer = malloc(
+        sizeof(mcc_vec4f) * (varying_count + 1) * r_config->vertex_count * MAX_SUBTRIANGLES
+    );
+
+    // One single task for every vertex
+    struct vertex_process_task_data task_data = {
+        .o_fragment_shader_data = r_config->o_fragment_shader_data,
+        .r_fragment_shader = r_config->r_fragment_shader,
+        .o_vertex_shader_data = r_config->o_vertex_shader_data,
+        .r_vertex_shader = r_config->r_vertex_shader,
+
+        .vertex_processing = r_config->vertex_processing,
+
+        .vertex_start_idx = 0,
+        .vertex_count = r_config->vertex_count,
+
+        .r_out_primitive_buffer = primitive_buffer,
+    };
+    vertex_process_task(&task_data);
+
+    uint32_t vertex_idx = 0;
+    uint32_t vertex_index_increment;
+    
+    switch (r_config->vertex_processing) {
+    case MCC_CPURAST_VERTEX_PROCESSING_TRIANGLE_LIST:
+        vertex_index_increment = 3;
+        break;
+    case MCC_CPURAST_VERTEX_PROCESSING_TRIANGLE_STRIP:
+        vertex_index_increment = 1;
+        break;
+    }
+
+    // Make an array of array for easy indexing
+    auto primitive_buffer_arr = (mcc_vec4f (*)[varying_count+1])primitive_buffer;
+
+    preallocated_varyings_t preallocated_varyings;
+    for (size_t i = 0; i < PREALLOCATED_VARYINGS_SIZE; i++) {
+        preallocated_varyings.v[i] = calloc(varying_count, sizeof(mcc_vec4f));
+    }
+    union mcc_cpurast_shaders_varying *fragment_varyings = calloc(varying_count, sizeof(mcc_vec4f));
+
+    primitive_t primitive = { .vertices = {
+        { .varyings = preallocated_varyings.v[0] },
+        { .varyings = preallocated_varyings.v[1] },
+        { .varyings = preallocated_varyings.v[2] },
+    }};
+
+    struct mcc_cpurast_fragment_shader_input frag_input = {
+        .o_in_data = r_config->o_fragment_shader_data,
+        .r_in_varyings = fragment_varyings,
+    };
+    struct mcc_rasterization_context rasterizaton_context = {
+        .culling_mode = r_config->culling_mode,
+        .r_attachment = r_config->r_attachment,
+        .r_primitive = &primitive,
+        .r_fragment_varyings = fragment_varyings,
+        .r_frag_input = &frag_input,
+        .r_fragment_shader = r_config->r_fragment_shader,
+        .o_depth_comparison_fn = r_config->o_depth_comparison_fn,
+        .varying_count = varying_count,
+    };
+
+    for (; vertex_idx + 3 < task_data.out_vertex_count; vertex_idx += vertex_index_increment) {
+        for (uint32_t sub_vert_i = 0; sub_vert_i < 3; sub_vert_i++) {
+            primitive.vertices[sub_vert_i].pos_homogeneous = primitive_buffer_arr[vertex_idx + sub_vert_i][0];
+            primitive.vertices[sub_vert_i].w_inv = 1.f / primitive.vertices[sub_vert_i].pos_homogeneous.w;
+            for (uint32_t varying_i = 0; varying_i < varying_count; varying_i++) {
+                primitive.vertices[sub_vert_i].varyings[varying_i].vec4f = primitive_buffer_arr[vertex_idx + sub_vert_i][1 + varying_i];
+            }
+        }
+
+        rasterize_triangle(&rasterizaton_context);
+    }
+
 
     for (size_t i = 0; i < PREALLOCATED_VARYINGS_SIZE; i++) {
         free(preallocated_varyings.v[i]);
     }
     free(fragment_varyings);
+    free(primitive_buffer);
 }
