@@ -16,6 +16,7 @@
  * Current fields (`function` and `data`) are kinda designed to be used with
  * any kind of value if required elsewhere, but thats the meanings i need
  * for the thread pool.
+ * FIXME: It it too big for lockless atomics ?
  */
 typedef struct {
     void (*function)(void*);

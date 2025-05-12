@@ -1,5 +1,11 @@
 #pragma once
 
+/**
+ * A thread pool where tasks can be dispatched from multiple threads (with locking).
+ * NOTE: *not* worksteal (designed for a single thread to dispatch task).
+ * FIXME: Make additional per-thread queues, using workstealing for taking tasks
+ *        making pushing new tasks a lockless operation ?
+ */
 struct mcc_thread_pool;
 
 typedef void (*mcc_thread_pool_task_fn)(void*);
@@ -10,8 +16,6 @@ struct mcc_thread_pool_task {
 };
 
 struct mcc_thread_pool *mcc_thread_pool_global();
-
-bool mcc_thread_pool_is_worker_thread(struct mcc_thread_pool *pool);
 
 /**
  * Locks the given pool to allow the current thread to use _push_task.
