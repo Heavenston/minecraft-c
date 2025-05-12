@@ -5,7 +5,6 @@
 #include "safe_cast.h"
 
 #include <assert.h>
-#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -339,120 +338,10 @@ struct mcc_rasterization_context {
     struct mcc_fragment_shader *r_fragment_shader;
     mcc_depth_comparison_fn o_depth_comparison_fn;
     size_t varying_count;
-    mcc_polygon_filter_fn polygon_filter;
 };
 
 typedef void (*mcc_rasterize_triangle_fn)(const struct mcc_rasterization_context*);
 
-// Forward declaration
-static void process_fragment(const struct mcc_rasterization_context *r_context, const struct mcc_pixel_params *pixel);
-
-static bool polygon_filter_fill(const struct mcc_barycentric_coords *) {
-    // All pixels are rendered
-    return true;
-}
-
-static void draw_line(const struct mcc_rasterization_context *r_context, 
-                     const struct processed_vertex *v0,
-                     const struct processed_vertex *v1) {
-    float wf = (float)r_context->r_attachment->width;
-    float hf = (float)r_context->r_attachment->height;
-
-    mcc_vec3f v0_pos_euclidian = mcc_vec3f_scale(v0->pos_homogeneous.xyz, v0->w_inv);
-    mcc_vec3f v1_pos_euclidian = mcc_vec3f_scale(v1->pos_homogeneous.xyz, v1->w_inv);
-    
-    int x0 = (int)(((v0_pos_euclidian.x + 1.f) * 0.5f * wf) + 0.5f);
-    int y0 = (int)(((-v0_pos_euclidian.y + 1.f) * 0.5f * hf) + 0.5f);
-    int x1 = (int)(((v1_pos_euclidian.x + 1.f) * 0.5f * wf) + 0.5f);
-    int y1 = (int)(((-v1_pos_euclidian.y + 1.f) * 0.5f * hf) + 0.5f);
-
-    int dx = abs(x1 - x0);
-    int dy = -abs(y1 - y0);
-    int sx = x0 < x1 ? 1 : -1;
-    int sy = y0 < y1 ? 1 : -1;
-    int err = dx + dy;
-    int e2;
-
-    while (true) {
-        if (x0 >= 0 && x0 < (int)r_context->r_attachment->width && 
-            y0 >= 0 && y0 < (int)r_context->r_attachment->height) {
-            size_t pixel_idx = (size_t)x0 + (size_t)y0 * r_context->r_attachment->width;
-            
-            mcc_vec2f screen_pos = {{
-                ((float)x0 + 0.5f) / wf * 2.f - 1.f,
-                ((float)y0 + 0.5f) / hf *-2.f + 1.f,
-            }};
-            
-            int origX0 = (int)(((v0_pos_euclidian.x + 1.f) * 0.5f * wf) + 0.5f);
-            int origY0 = (int)(((-v0_pos_euclidian.y + 1.f) * 0.5f * hf) + 0.5f);
-            
-            float currentDistSq = (float)((x0 - origX0) * (x0 - origX0) + (y0 - origY0) * (y0 - origY0));
-            float totalDistSq = (float)((x1 - origX0) * (x1 - origX0) + (y1 - origY0) * (y1 - origY0));
-            
-            float t;
-            if (totalDistSq > 0.0f) {
-                t = sqrtf(currentDistSq / totalDistSq);
-            } else {
-                t = 0.0f;
-            }
-            
-            t = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
-            
-            struct mcc_barycentric_coords barycentric = {
-                .u = t,
-                .v = 0.0f,
-                .w = 1.0f - t,
-            };
-            
-            float depth = v0_pos_euclidian.z * (1.0f - t) + v1_pos_euclidian.z * t;
-            
-            auto depth_attachment = r_context->r_attachment->o_depth;
-            if (depth < 0.f || depth > 1.f) {
-            } else if (
-                depth_attachment &&
-                r_context->o_depth_comparison_fn &&
-                !r_context->o_depth_comparison_fn(depth_attachment->r_data[pixel_idx], depth)
-            ) {
-            } else {
-                struct mcc_pixel_params pixel = {
-                    .barycentric = barycentric,
-                    .screen_pos = screen_pos,
-                    .depth = depth,
-                    .pixel_idx = pixel_idx
-                };
-                process_fragment(r_context, &pixel);
-            }
-        }
-        
-        if (x0 == x1 && y0 == y1) break;
-        
-        e2 = 2 * err;
-        if (e2 >= dy) {
-            if (x0 == x1) break;
-            err += dy;
-            x0 += sx;
-        }
-        if (e2 <= dx) {
-            if (y0 == y1) break;
-            err += dx;
-            y0 += sy;
-        }
-    }
-}
-
-static bool polygon_filter_wireframe(const struct mcc_barycentric_coords *) {
-    return false;
-}
-
-static bool polygon_filter_point(const struct mcc_barycentric_coords *coords) {
-    // Only pixels near vertices are rendered
-    const float point_threshold = 0.05f;
-    return coords->u >= (1.0f - point_threshold) || 
-           coords->v >= (1.0f - point_threshold) || 
-           coords->w >= (1.0f - point_threshold);
-}
-
-// Helper function to process a single fragment
 static void process_fragment(const struct mcc_rasterization_context *r_context, const struct mcc_pixel_params *pixel) {
     auto depth_attachment = r_context->r_attachment->o_depth;
     auto color_attachment = r_context->r_attachment->o_color;
@@ -537,13 +426,6 @@ static void rasterize_triangle(const struct mcc_rasterization_context *r_context
     //     primitive->v1 = primitive->v2;
     //     primitive->v2 = tv;
     // }
-    
-    if (r_context->polygon_filter == polygon_filter_wireframe) {
-        draw_line(r_context, &primitive->v0, &primitive->v1);
-        draw_line(r_context, &primitive->v1, &primitive->v2);
-        draw_line(r_context, &primitive->v2, &primitive->v0);
-        return;
-    }
 
     // Screen dimensions as floats
     float wf = (float)r_context->r_attachment->width;
@@ -594,10 +476,6 @@ static void rasterize_triangle(const struct mcc_rasterization_context *r_context
                 .v = det01p / det012,
                 .w = det12p / det012,
             };
-            
-            // Apply polygon mode filter (fill, point)
-            if (!r_context->polygon_filter(&barycentric))
-                continue;
 
             // Calculate depth using barycentric coordinates
             float depth = v1.z * barycentric.u + v2.z * barycentric.v + v0.z * barycentric.w;
@@ -651,21 +529,6 @@ static struct clip_triangle_output clip_triangle(struct mcc_triangle_clip_contex
 void mcc_cpurast_render(const struct mcc_cpurast_render_config *r_config) {
     assert(r_config->r_fragment_shader->varying_count == r_config->r_vertex_shader->varying_count);
     size_t varying_count = r_config->r_vertex_shader->varying_count;
-    
-    // Select polygon filter function based on polygon mode
-    mcc_polygon_filter_fn polygon_filter;
-    switch (r_config->polygon_mode) {
-        case MCC_CPURAST_POLYGON_MODE_LINE:
-            polygon_filter = polygon_filter_wireframe;
-            break;
-        case MCC_CPURAST_POLYGON_MODE_POINT:
-            polygon_filter = polygon_filter_point;
-            break;
-        case MCC_CPURAST_POLYGON_MODE_FILL:
-        default:
-            polygon_filter = polygon_filter_fill;
-            break;
-    }
 
     preallocated_varyings_t preallocated_varyings;
     for (size_t i = 0; i < PREALLOCATED_VARYINGS_SIZE; i++) {
@@ -722,7 +585,6 @@ void mcc_cpurast_render(const struct mcc_cpurast_render_config *r_config) {
         .r_fragment_shader = r_config->r_fragment_shader,
         .o_depth_comparison_fn = r_config->o_depth_comparison_fn,
         .varying_count = varying_count,
-        .polygon_filter = polygon_filter
     };
 
     for (; vertex_idx < r_config->vertex_count; vertex_idx += vertex_index_increment) {
