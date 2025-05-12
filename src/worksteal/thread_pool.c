@@ -96,7 +96,9 @@ static struct mcc_thread_pool *create_thread_pool() {
     mcc_worksteal_queue_init(&new_thread_pool->queue, 16);
     pthread_mutex_init(&new_thread_pool->queue_mutex, NULL);
     pthread_cond_init(&new_thread_pool->queue_cond, NULL);
+    #ifndef NDEBUG
     new_thread_pool->locking_queue_thread_id = -1;
+    #endif
 
     new_thread_pool->thread_count = safe_to_size_t(nprocs);
     new_thread_pool->threads = calloc(new_thread_pool->thread_count, sizeof(*new_thread_pool->threads));
