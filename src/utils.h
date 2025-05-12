@@ -21,6 +21,10 @@
 #define mcc_next_pow_of_2(VAL) (1UL << mcc_bit_width(VAL))
 #define mcc_round_up_pow_of_2(VAL) (mcc_is_pow_of_2(VAL) ? VAL : mcc_next_pow_of_2(VAL))
 
+#define mcc_up_div(A, B) (((A) + ((B) - 1)) / (B))
+#define mcc_max(A, B) ((B) > (A) ? (B) : (A))
+#define mcc_min(A, B) ((B) < (A) ? (B) : (A))
+
 #ifndef NDEBUG
 #define mcc_unreachable() do { panic("Reached unreachable"); } while(false)
 #else

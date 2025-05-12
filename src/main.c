@@ -88,7 +88,7 @@ int main() {
     bool enable_wireframe = false,
          enable_depth_rendering = false;
 
-    mcc_vec3f camera_pos = {{ 6.f, 5.5f, 6.f }};
+    mcc_vec3f camera_pos = {{ 4.5f, 5.5f, 4.5f }};
 
     for (bool close = false; !close;) {
         union mcc_window_event event = mcc_window_wait_next_event(window);
