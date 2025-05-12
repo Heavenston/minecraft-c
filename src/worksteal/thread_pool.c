@@ -121,6 +121,7 @@ static struct mcc_thread_pool *create_thread_pool() {
             priv
         );
 
+        (void)create_result;
         assert(create_result == 0);
     }
 

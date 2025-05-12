@@ -14,8 +14,7 @@
 // Simple macros for type conversion checks
 #define create_safe_cast_fn(NAME, FROM, TO) TO NAME(FROM val) { \
     if (sizeof(FROM) > sizeof(TO)) { \
-        TO max_val = ~(TO)0; \
-        assert(val <= (FROM)max_val); \
+        assert(val <= (FROM)~(TO)0); \
     } \
     return (TO)val; \
 }
@@ -23,25 +22,21 @@
 #define create_safe_cast_fn_signed_to_unsigned(NAME, FROM, TO) TO NAME(FROM val) { \
     assert(val >= 0); \
     if (sizeof(FROM) >= sizeof(TO)) { \
-        TO max_val = ~(TO)0; \
-        assert(val <= (FROM)max_val); \
+        assert(val <= (FROM)~(TO)0); \
     } \
     return (TO)val; \
 }
 
 #define create_safe_cast_fn_unsigned_to_signed(NAME, FROM, TO) TO NAME(FROM val) { \
     /* Maximum positive value of signed type */ \
-    TO max_val = ((TO)1 << (sizeof(TO) * 8 - 1)) - 1; \
-    assert(val <= (FROM)max_val); \
+    assert(val <= (FROM)(TO)(((TO)1 << (sizeof(TO) * 8 - 1)) - 1)); \
     return (TO)val; \
 }
 
 #define create_safe_cast_fn_signed_to_signed(NAME, FROM, TO) TO NAME(FROM val) { \
     if (sizeof(FROM) > sizeof(TO)) { \
         /* Max and min values for target type */ \
-        TO max_val = ((TO)1 << (sizeof(TO) * 8 - 1)) - 1; \
-        TO min_val = ((TO)1 << (sizeof(TO) * 8 - 1)); \
-        assert(val <= (FROM)max_val && val >= (FROM)min_val); \
+        assert(val <= (FROM)(TO)(((TO)1 << (sizeof(TO) * 8 - 1)) - 1) && val >= (FROM)(TO)((TO)1 << (sizeof(TO) * 8 - 1))); \
     } \
     return (TO)val; \
 }
