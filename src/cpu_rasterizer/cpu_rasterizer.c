@@ -58,21 +58,6 @@ const struct plane clipping_planes[] = {
  */
 #define PREALLOCATED_VARYINGS_SIZE (MAX_SUBTRIANGLES * 6)
 
-struct clip_triangle_output {
-    /**
-     * Between 0 and MAX_SUBTRIANGLES (included)
-     */
-    size_t triangle_count;
-    primitive_t triangles[MAX_SUBTRIANGLES];
-};
-
-void clipped_triangles_append(struct clip_triangle_output *into, struct clip_triangle_output from) {
-    assert(into->triangle_count + from.triangle_count <= MAX_SUBTRIANGLES);
-    for (size_t i = 0; i < from.triangle_count; i++) {
-        into->triangles[into->triangle_count++] = from.triangles[i];
-    }
-}
-
 typedef struct {
     union mcc_cpurast_shaders_varying *v[PREALLOCATED_VARYINGS_SIZE];
     /**
@@ -85,41 +70,88 @@ static float signed_distance(struct plane plane, mcc_vec4f vertex) {
     return mcc_vec4f_dot(plane.normal, vertex) + plane.D;
 }
 
-struct clip_triangle_context {
-    size_t varyings_count;
-    preallocated_varyings_t *preallocated_varyings;
-    primitive_t triangle;
-    struct plane plane;
+/**
+ * Context for calculating sub triangles form a single triangle intersecting
+ * a list of hardcoded clip planes
+ */
+struct mcc_triangle_clip_context {
+    const size_t varying_count;
+    /**
+     * Assumes to have enough memory for MAX_SUBTRIANGLES triangles
+     * and to have a single initial triangle (3 vertices)
+     */
+    mcc_vec4f * const r_primitive_buffer;
+    /**
+     * Number of vertices outputed.
+     */
+    size_t out_vertex_count;
+};
+
+/**
+ * Context for calculating sub triangles form a single triangle intersecting
+ * a single plane.
+ * The convoluted workings of appending/overwrite of the primitives is intended
+ * to remove the need for a temporary buffer (by means of premature optimisation (TM))
+ */
+struct plane_clip_triangle_context {
+    const size_t varying_count;
+    /**
+     * Assumes to have enough memory for any required triangles.
+     */
+    mcc_vec4f * const r_primitive_buffer;
+    /**
+     * Number of primitives in the primitive buffer, may be higher than 1
+     * in which case the other primitives will be left untouched, and
+     * if there is a new primitive created it will be apended after them extending
+     * the buffer size.
+     */
+    const size_t primitive_buffer_count;
+    /**
+     * Initially one, can be set to 0, 1 or 2 depending of the clipping results.
+     * If set to 0, this means the first primitive of the buffer should be
+     * removed.
+     * If set to 1 this means the first primitive of the buffer has been overwritten 
+     * with the new primitive.
+     * If the so 2, the previous primitive has been overwritten as well as a new
+     * primitive was appended to the end of the buffer (after primitive_buffer_count)
+     */
+    size_t in_out_triangle_count;
+    const struct plane plane;
 };
 
 typedef struct intersection_context {
-    struct clip_triangle_context *ctctx;
-    union mcc_cpurast_shaders_varying *touse_varyings;
-    struct processed_vertex v0;
-    struct processed_vertex v1;
+    struct plane_clip_triangle_context *ctctx;
+    mcc_vec4f *v0;
+    mcc_vec4f *v1;
     float value0;
     float value1;
+    /**
+     * Out vertex, may be the same as v0 or v1
+     */
+    mcc_vec4f *out;
 } ic_t;
 
-static struct processed_vertex clip_edge(ic_t ctx) {
+static void clip_edge(ic_t ctx) {
     float t = ctx.value0 / (ctx.value0 - ctx.value1);
 
-    struct processed_vertex v;
-    v.pos_homogeneous = mcc_vec4f_add(
-        mcc_vec4f_scale(ctx.v0.pos_homogeneous, 1.f - t),
-        mcc_vec4f_scale(ctx.v1.pos_homogeneous, t)
-    );
-    v.w_inv = 1.f / v.pos_homogeneous.w;
-    // TODO: Use pre allocated values (this is a leak)
-    v.varyings = ctx.touse_varyings;
-    for (size_t vi = 0; vi < ctx.ctctx->varyings_count; vi++) {
-        v.varyings[vi].vec4f = mcc_vec4f_add(
-            mcc_vec4f_scale(ctx.v0.varyings[vi].vec4f, 1.f - t),
-            mcc_vec4f_scale(ctx.v1.varyings[vi].vec4f, t)
+    for (uint32_t i = 0; i < ctx.ctctx->varying_count+1; i++) {
+        ctx.out[i] = mcc_vec4f_add(
+            mcc_vec4f_scale(ctx.v0[i], 1.f - t),
+            mcc_vec4f_scale(ctx.v1[i], t)
         );
     }
+}
 
-    return v;
+typedef struct copy_edge_context {
+    struct plane_clip_triangle_context *ctctx;
+    mcc_vec4f *in;
+    mcc_vec4f *out;
+} cc_t;
+
+static void copy_edge(cc_t ctx) {
+    for (uint32_t i = 0; i < ctx.ctctx->varying_count+1; i++) {
+        ctx.out[i] = ctx.in[i];
+    }
 }
 
 /*
@@ -128,113 +160,123 @@ static struct processed_vertex clip_edge(ic_t ctx) {
  * And
  * https://lisyarus.github.io/blog/posts/implementing-a-tiny-cpu-rasterizer-part-5.html
  */
-static struct clip_triangle_output clip_triangle_once(struct clip_triangle_context ctx) {
-    primitive_t triangle = ctx.triangle;
-    struct plane plane = ctx.plane;
-    struct clip_triangle_output output = {};
+static void clip_triangle_once(struct plane_clip_triangle_context *ctx) {
+    struct plane plane = ctx->plane;
+
+    // This makes indexing easier as to not require the multiplication by `ctx->varying_count + 1` each time
+    mcc_vec4f (*buf)[ctx->varying_count + 1] = (void*)ctx->r_primitive_buffer;
+    size_t in_v0 = 0 * 3 + 0;
+    size_t in_v1 = 0 * 3 + 1;
+    size_t in_v2 = 0 * 3 + 2;
+    size_t ou_v0 = ctx->primitive_buffer_count * 3 + 0;
+    size_t ou_v1 = ctx->primitive_buffer_count * 3 + 1;
+    size_t ou_v2 = ctx->primitive_buffer_count * 3 + 2;
 
     float values[3] = {
-        signed_distance(plane, triangle.v0.pos_homogeneous),
-        signed_distance(plane, triangle.v1.pos_homogeneous),
-        signed_distance(plane, triangle.v2.pos_homogeneous)
+        signed_distance(plane, buf[in_v0][0]),
+        signed_distance(plane, buf[in_v1][0]),
+        signed_distance(plane, buf[in_v2][0])
     };
 
     uint8_t mask = (values[0] <= 0.f ? 1 : 0) | (values[1] <= 0.f ? 2 : 0) | (values[2] <= 0.f ? 4 : 0);
 
-    // Preemptively allocate two varyings array, but decrement the free_head if they
-    // end up not being used, kinda ugly but i dont want to have these 2 lines
-    // 6 times
-    auto nva = ctx.preallocated_varyings->v[ctx.preallocated_varyings->free_head++];
-    auto nvb = ctx.preallocated_varyings->v[ctx.preallocated_varyings->free_head++];
-
     switch (mask) {
     case 0b000:
-        output.triangles[output.triangle_count] = triangle;
-        output.triangle_count++;
-        ctx.preallocated_varyings->free_head -= 2;
-        break;
+        // No changes
+        ctx->in_out_triangle_count = 1;
+        return;
     case 0b001: {
-        struct processed_vertex v01 = clip_edge((ic_t){ &ctx, nva, triangle.v0, triangle.v1, values[0], values[1] });
-        struct processed_vertex v02 = clip_edge((ic_t){ &ctx, nvb, triangle.v0, triangle.v2, values[0], values[2] });
+        clip_edge((ic_t){ ctx, buf[in_v0], buf[in_v1], values[0], values[1], buf[ou_v0] });
+        // output.triangles[output.triangle_count].v0 = v01;
+        copy_edge((cc_t){ ctx, buf[in_v1],                                   buf[ou_v1] });
+        // output.triangles[output.triangle_count].v1 = triangle.v1;
+        copy_edge((cc_t){ ctx, buf[in_v2],                                   buf[ou_v2] });
+        // output.triangles[output.triangle_count].v2 = triangle.v2;
 
-        output.triangles[output.triangle_count].v0 = v01;
-        output.triangles[output.triangle_count].v1 = triangle.v1;
-        output.triangles[output.triangle_count].v2 = triangle.v2;
-        output.triangle_count++;
+        clip_edge((ic_t){ ctx, buf[in_v0], buf[in_v2], values[0], values[2], buf[in_v2] });
+        // output.triangles[output.triangle_count].v2 = v02;
+        clip_edge((ic_t){ ctx, buf[in_v0], buf[in_v1], values[0], values[1], buf[in_v0] });
+        // output.triangles[output.triangle_count].v0 = v01;
+        copy_edge((cc_t){ ctx, buf[ou_v2 /* in place of in_v2 */],           buf[in_v1] });
+        // output.triangles[output.triangle_count].v1 = triangle.v2;
 
-        output.triangles[output.triangle_count].v0 = v01;
-        output.triangles[output.triangle_count].v1 = triangle.v2;
-        output.triangles[output.triangle_count].v2 = v02;
-        output.triangle_count++;
+        ctx->in_out_triangle_count = 2;
         break;
     }
     case 0b010: {
-        struct processed_vertex v10 = clip_edge((ic_t){ &ctx, nva, triangle.v1, triangle.v0, values[1], values[0] });
-        struct processed_vertex v12 = clip_edge((ic_t){ &ctx, nvb, triangle.v1, triangle.v2, values[1], values[2] });
+        copy_edge((cc_t){ ctx, buf[in_v0],                                   buf[ou_v0] });
+        // output.triangles[output.triangle_count].v0 = triangle.v0;
+        clip_edge((ic_t){ ctx, buf[in_v1], buf[in_v0], values[1], values[0], buf[ou_v1] });
+        // output.triangles[output.triangle_count].v1 = v10;
+        copy_edge((cc_t){ ctx, buf[in_v2],                                   buf[ou_v2] });
+        // output.triangles[output.triangle_count].v2 = triangle.v2;
 
-        output.triangles[output.triangle_count].v0 = triangle.v0;
-        output.triangles[output.triangle_count].v1 = v10;
-        output.triangles[output.triangle_count].v2 = triangle.v2;
-        output.triangle_count++;
+        clip_edge((ic_t){ ctx, buf[in_v1], buf[in_v2], values[1], values[2], buf[in_v2] });
+        // output.triangles[output.triangle_count].v2 = v12;
+        clip_edge((ic_t){ ctx, buf[in_v1], buf[in_v0], values[1], values[0], buf[in_v1] });
+        // output.triangles[output.triangle_count].v1 = v10;
+        copy_edge((cc_t){ ctx, buf[ou_v2],                                   buf[in_v0] });
+        // output.triangles[output.triangle_count].v0 = triangle.v2;
 
-        output.triangles[output.triangle_count].v0 = triangle.v2;
-        output.triangles[output.triangle_count].v1 = v10;
-        output.triangles[output.triangle_count].v2 = v12;
-        output.triangle_count++;
+        ctx->in_out_triangle_count = 2;
         break;
     }
     case 0b011: {
-        struct processed_vertex v02 = clip_edge((ic_t){ &ctx, nva, triangle.v0, triangle.v2, values[0], values[2] });
-        struct processed_vertex v12 = clip_edge((ic_t){ &ctx, nvb, triangle.v1, triangle.v2, values[1], values[2] });
+        clip_edge((ic_t){ ctx, buf[in_v0], buf[in_v2], values[0], values[2], buf[in_v0] });
+        // output.triangles[output.triangle_count].v0 = v02;
+        clip_edge((ic_t){ ctx, buf[in_v1], buf[in_v2], values[1], values[2], buf[in_v1] });
+        // output.triangles[output.triangle_count].v1 = v12;
+        copy_edge((cc_t){ ctx, buf[in_v2],                                   buf[in_v2] });
+        // output.triangles[output.triangle_count].v2 = triangle.v2;
 
-        output.triangles[output.triangle_count].v0 = v02;
-        output.triangles[output.triangle_count].v1 = v12;
-        output.triangles[output.triangle_count].v2 = triangle.v2;
-        output.triangle_count++;
+        ctx->in_out_triangle_count = 1;
         break;
     }
     case 0b100: {
-        struct processed_vertex v20 = clip_edge((ic_t){ &ctx, nva, triangle.v2, triangle.v0, values[2], values[0] });
-        struct processed_vertex v21 = clip_edge((ic_t){ &ctx, nvb, triangle.v2, triangle.v1, values[2], values[1] });
+        copy_edge((cc_t){ ctx, buf[in_v0],                                   buf[ou_v0] });
+        // output.triangles[output.triangle_count].v0 = triangle.v0;
+        copy_edge((cc_t){ ctx, buf[in_v1],                                   buf[ou_v1] });
+        // output.triangles[output.triangle_count].v1 = triangle.v1;
+        clip_edge((ic_t){ ctx, buf[in_v2], buf[in_v0], values[2], values[0], buf[ou_v2] });
+        // output.triangles[output.triangle_count].v2 = v20;
 
-        output.triangles[output.triangle_count].v0 = triangle.v0;
-        output.triangles[output.triangle_count].v1 = triangle.v1;
-        output.triangles[output.triangle_count].v2 = v20;
-        output.triangle_count++;
+        clip_edge((ic_t){ ctx, buf[in_v2], buf[in_v0], values[2], values[0], buf[in_v0] });
+        // output.triangles[output.triangle_count].v0 = v20;
+        copy_edge((cc_t){ ctx, buf[in_v1],                                   buf[in_v1] });
+        // output.triangles[output.triangle_count].v1 = triangle.v1;
+        clip_edge((ic_t){ ctx, buf[in_v2], buf[ou_v1], values[2], values[1], buf[in_v2] });
+        //                                      ^ in place of in_v1
+        // output.triangles[output.triangle_count].v2 = v21;
 
-        output.triangles[output.triangle_count].v0 = v20;
-        output.triangles[output.triangle_count].v1 = triangle.v1;
-        output.triangles[output.triangle_count].v2 = v21;
-        output.triangle_count++;
+        ctx->in_out_triangle_count = 2;
         break;
     }
     case 0b101: {
-        struct processed_vertex v01 = clip_edge((ic_t){ &ctx, nva, triangle.v0, triangle.v1, values[0], values[1] });
-        struct processed_vertex v21 = clip_edge((ic_t){ &ctx, nvb, triangle.v2, triangle.v1, values[2], values[1] });
+        clip_edge((ic_t){ ctx, buf[in_v0], buf[in_v1], values[0], values[1], buf[in_v0] });
+        // output.triangles[output.triangle_count].v0 = v01;
+        copy_edge((cc_t){ ctx, buf[in_v1],                                   buf[in_v1] });
+        // output.triangles[output.triangle_count].v1 = triangle.v1;
+        clip_edge((ic_t){ ctx, buf[in_v2], buf[in_v1], values[2], values[1], buf[in_v2] });
+        // output.triangles[output.triangle_count].v2 = v21;
 
-        output.triangles[output.triangle_count].v0 = v01;
-        output.triangles[output.triangle_count].v1 = triangle.v1;
-        output.triangles[output.triangle_count].v2 = v21;
-        output.triangle_count++;
+        ctx->in_out_triangle_count = 1;
         break;
     }
     case 0b110: {
-        struct processed_vertex v10 = clip_edge((ic_t){ &ctx, nva, triangle.v1, triangle.v0, values[1], values[0] });
-        struct processed_vertex v20 = clip_edge((ic_t){ &ctx, nvb, triangle.v2, triangle.v0, values[2], values[0] });
+        copy_edge((cc_t){ ctx, buf[in_v0],                                   buf[in_v0] });
+        // output.triangles[output.triangle_count].v0 = triangle.v0;
+        clip_edge((ic_t){ ctx, buf[in_v1], buf[in_v0], values[1], values[0], buf[in_v1] });
+        // output.triangles[output.triangle_count].v1 = v10;
+        clip_edge((ic_t){ ctx, buf[in_v2], buf[in_v0], values[2], values[0], buf[in_v2] });
+        // output.triangles[output.triangle_count].v2 = v20;
 
-        output.triangles[output.triangle_count].v0 = triangle.v0;
-        output.triangles[output.triangle_count].v1 = v10;
-        output.triangles[output.triangle_count].v2 = v20;
-        output.triangle_count++;
+        ctx->in_out_triangle_count = 1;
         break;
     }
     case 0b111:
-        ctx.preallocated_varyings->free_head -= 2;
+        ctx->in_out_triangle_count = 0;
         break;
     }
-
-    assert(ctx.preallocated_varyings->free_head <= PREALLOCATED_VARYINGS_SIZE);
-    return output;
 }
  
 void mcc_cpurast_clear(const struct mcc_cpurast_clear_config *r_config) {
@@ -313,12 +355,6 @@ struct mcc_pixel_params {
 };
 
 typedef bool (*mcc_polygon_filter_fn)(const struct mcc_barycentric_coords *coords);
-
-struct mcc_triangle_clip_context {
-    primitive_t *r_primitive;
-    size_t varying_count;
-    preallocated_varyings_t *r_preallocated_varyings;
-};
 
 struct mcc_rasterization_context {
     enum mcc_cpurast_culling_mode culling_mode;
@@ -493,29 +529,66 @@ static void rasterize_triangle(const struct mcc_rasterization_context *r_context
     }
 }
 
-static struct clip_triangle_output clip_triangle(struct mcc_triangle_clip_context ctx) {
-    struct clip_triangle_output output = {
-        .triangle_count = 1,
-        .triangles = { *ctx.r_primitive },
-    };
+static void clip_triangle(struct mcc_triangle_clip_context *ctx) {
+    const size_t tri_buff_size = (ctx->varying_count + 1) * 3;
+    const size_t tri_byte_size = tri_buff_size * sizeof(mcc_vec4f);
+
+    size_t triangle_count = 1;
 
     for (size_t plane_i = 0; plane_i < sizeof(clipping_planes) / sizeof(*clipping_planes); plane_i++) {
-        struct clip_triangle_output sub_output = {};
-
-        for (size_t primitive_i = 0; primitive_i < output.triangle_count; primitive_i++) {
-            auto clip_output = clip_triangle_once((struct clip_triangle_context){
-                .varyings_count = ctx.varying_count,
-                .preallocated_varyings = ctx.r_preallocated_varyings,
-                .triangle = output.triangles[primitive_i],
+        // We process the whole primitive buffer each time, but we also
+        // modify it inline, modifying the current primitive, as well as adding
+        // new ones at the end.
+        // Removing the current primitive is done by shifting the whole buffer
+        // one to the left (cannot do a swap remove by copying the last one
+        // because if new ones were added before the last one may not be one we
+        // should clip right now)
+        
+        size_t previous_triangle_count = triangle_count;
+        for (size_t triangle_i = 0; triangle_i < previous_triangle_count;) {
+            struct plane_clip_triangle_context sctx = {
+                .varying_count = ctx->varying_count,
+                .r_primitive_buffer = ctx->r_primitive_buffer + triangle_i * tri_buff_size,
+                .primitive_buffer_count = triangle_count,
+                .in_out_triangle_count = 1,
                 .plane = clipping_planes[plane_i],
-            });
-            clipped_triangles_append(&sub_output, clip_output);
-        }
+            };
+            clip_triangle_once(&sctx);
 
-        output = sub_output;
+            switch (sctx.in_out_triangle_count) {
+            case 0:
+                // Shifts the whole buffer one primitive to the left
+                
+                if (triangle_count > triangle_i + 1) {
+                    memmove(
+                        &sctx.r_primitive_buffer[tri_buff_size * triangle_i],
+                        &sctx.r_primitive_buffer[tri_buff_size * (triangle_i + 1)],
+                        tri_byte_size * (triangle_count - triangle_i - 1)
+                    );
+                }
+
+                // One less primitive now
+                assert(triangle_count > 0);
+                triangle_count -= 1;
+                
+                // We do not increment primitive_i, the buffer moved, not the
+                // index
+                previous_triangle_count--;
+                break;
+            case 1:
+                // Noting special to do here (the primitive was just edited inline)
+                triangle_i++;
+                break;
+            case 2:
+                // One primitive was added to the end, only difference.
+                triangle_count += 1;
+                triangle_i++;
+                break;
+            }
+        }
     }
 
-    return output;
+    ctx->out_vertex_count = triangle_count * 3;
 }
 
 struct vertex_process_task_data {
@@ -548,18 +621,13 @@ static void vertex_process_task(void *r_void_data) {
     assert(r_data != NULL);
 
     assert(r_data->r_fragment_shader->varying_count == r_data->r_vertex_shader->varying_count);
-    size_t varying_count = r_data->r_vertex_shader->varying_count;
+    uint32_t varying_count = r_data->r_vertex_shader->varying_count;
 
-    preallocated_varyings_t preallocated_varyings;
-    for (size_t i = 0; i < PREALLOCATED_VARYINGS_SIZE; i++) {
-        preallocated_varyings.v[i] = calloc(varying_count, sizeof(mcc_vec4f));
-    }
+    // Number of elements in the primitive buffer for a single vertex
+    const uint32_t vsib = varying_count + 1;
 
-    primitive_t primitive = { .vertices = {
-        { .varyings = preallocated_varyings.v[0] },
-        { .varyings = preallocated_varyings.v[1] },
-        { .varyings = preallocated_varyings.v[2] },
-    }};
+    // Contains the vertices of the currently proccesed primitive
+    mcc_vec4f *current_primitive_buffer = calloc(vsib * 3, sizeof(mcc_vec4f));
 
     struct mcc_cpurast_vertex_shader_input vert_input = {
         .o_in_data = r_data->o_vertex_shader_data,
@@ -568,83 +636,75 @@ static void vertex_process_task(void *r_void_data) {
     uint32_t vertex_idx = r_data->vertex_start_idx;
     uint32_t vertex_index_increment;
     
-    // If we are in triangle strip, the first two vertices must be processed before
-    // for the next primitives, the first two vertices will be the ones from the
-    // previous primitive.
     switch (r_data->vertex_processing) {
     case MCC_CPURAST_VERTEX_PROCESSING_TRIANGLE_LIST:
         vertex_index_increment = 3;
         break;
     case MCC_CPURAST_VERTEX_PROCESSING_TRIANGLE_STRIP:
+        // If we are in triangle strip, the first two vertices must be processed before
+        // for the next primitives, the first two vertices will be the ones from the
+        // previous primitive.
         vertex_index_increment = 1;
         for (size_t di = 0; di < 2; di++, vertex_idx++) {
-            struct processed_vertex *pv = &primitive.vertices[di + 1];
-
             vert_input.in_vertex_idx = vertex_idx;
-            vert_input.r_out_varyings = pv->varyings;
+            vert_input.r_out_varyings = (union mcc_cpurast_shaders_varying*)
+                &current_primitive_buffer[vsib * di + 1];
             r_data->r_vertex_shader->r_fn(&vert_input);
-            pv->pos_homogeneous = vert_input.out_position;
-            pv->w_inv = 1.f / pv->pos_homogeneous.w;
+            current_primitive_buffer[vsib * di] = vert_input.out_position;
         }
         break;
     }
-
-    uint32_t output_counter = 0;
+    uint32_t output_vertex_counter = 0;
 
     for (; vertex_idx < r_data->vertex_start_idx + r_data->vertex_count; vertex_idx += vertex_index_increment) {
         switch (r_data->vertex_processing) {
         case MCC_CPURAST_VERTEX_PROCESSING_TRIANGLE_LIST:
-            for (size_t di = 0; di < 3; di++) {
-                vert_input.in_vertex_idx = vertex_idx + safe_to_u32(di);
-                vert_input.r_out_varyings = primitive.vertices[di].varyings;
+            for (uint32_t di = 0; di < 3; di++) {
+                vert_input.in_vertex_idx = vertex_idx + di;
+                vert_input.r_out_varyings = (union mcc_cpurast_shaders_varying*)
+                    &current_primitive_buffer[vsib * di + 1];
                 r_data->r_vertex_shader->r_fn(&vert_input);
-                primitive.vertices[di].pos_homogeneous = vert_input.out_position;
-                primitive.vertices[di].w_inv = 1.f / primitive.vertices[di].pos_homogeneous.w;
+                current_primitive_buffer[vsib * di] = vert_input.out_position;
             }
             break;
         case MCC_CPURAST_VERTEX_PROCESSING_TRIANGLE_STRIP:
-            // 'rotate' the vertices to put the last two as the first two
-            auto v0_copy = primitive.v0;
-            primitive.v0 = primitive.v1;
-            primitive.v1 = primitive.v2;
-            primitive.v2 = v0_copy;
+            // 'move' the last two vertices on the first one
+            memmove(
+                &current_primitive_buffer[0],
+                &current_primitive_buffer[vsib],
+                // The last two vertex
+                sizeof(mcc_vec4f) * vsib * 2
+            );
 
+            // Compute the last vertex only
             vert_input.in_vertex_idx = vertex_idx;
-            vert_input.r_out_varyings = primitive.v2.varyings;
+            vert_input.r_out_varyings = (union mcc_cpurast_shaders_varying*)
+                &current_primitive_buffer[vsib * 2 + 1];
             r_data->r_vertex_shader->r_fn(&vert_input);
-            primitive.v2.pos_homogeneous = vert_input.out_position;
-            primitive.v2.w_inv = 1.f / primitive.v2.pos_homogeneous.w;
+            current_primitive_buffer[vsib * 2] = vert_input.out_position;
             break;
         }
+
+        memcpy(
+            &r_data->r_out_primitive_buffer[output_vertex_counter * vsib],
+            current_primitive_buffer,
+            sizeof(mcc_vec4f) * vsib * 3
+        );
         
-        preallocated_varyings.free_head = 3;
-        auto clipped_output = clip_triangle((struct mcc_triangle_clip_context) {
-            .r_primitive = &primitive,
+        struct mcc_triangle_clip_context clip_ctx = {
             .varying_count = varying_count,
-            .r_preallocated_varyings = &preallocated_varyings,
-        });
+            .r_primitive_buffer = &r_data->r_out_primitive_buffer[output_vertex_counter * vsib],
+        };
+        clip_triangle(&clip_ctx);
 
-        for (size_t triangle_i = 0; triangle_i < clipped_output.triangle_count; triangle_i++) {
-            primitive_t *primitive = &clipped_output.triangles[triangle_i];
-            for (size_t vertex_i = 0; vertex_i < 3; vertex_i++) {
-                struct processed_vertex *vertex = &primitive->vertices[vertex_i];
-                r_data->r_out_primitive_buffer[output_counter++] = vertex->pos_homogeneous;
-                for (size_t varying_i = 0; varying_i < varying_count; varying_i++) {
-                    r_data->r_out_primitive_buffer[output_counter++] = vertex->varyings[varying_i].vec4f;
-                }
-            }
-        }
+        output_vertex_counter += clip_ctx.out_vertex_count;
     }
 
-    r_data->out_vertex_count = output_counter / (varying_count + 1);
+    r_data->out_vertex_count = output_vertex_counter;
 
-    for (size_t i = 0; i < PREALLOCATED_VARYINGS_SIZE; i++) {
-        free(preallocated_varyings.v[i]);
-    }
-
-    if (r_data->o_wait_counter) {
+    free(current_primitive_buffer);
+    if (r_data->o_wait_counter)
         mcc_wait_counter_decrement(r_data->o_wait_counter, 1);
-    }
 }
 
 void mcc_cpurast_render(const struct mcc_cpurast_render_config *r_config) {
@@ -654,19 +714,20 @@ void mcc_cpurast_render(const struct mcc_cpurast_render_config *r_config) {
     // TODO: For very big meshes if would make sense to break it down into
     //       batches?
     // One element for vertex position, and one for each additional varying,
-    // and all of that for each vertex
-    mcc_vec4f *primitive_buffer = malloc(
-        sizeof(mcc_vec4f) * (varying_count + 1) * r_config->vertex_count * MAX_SUBTRIANGLES
-    );
+    // and all of that for each vertex (pretty big!)
+    size_t primitive_buffer_size =
+        sizeof(mcc_vec4f) * (varying_count + 1) * r_config->vertex_count * MAX_SUBTRIANGLES;
+    fprintf(stderr, "primitive_buffer_size: %zu bytes\n", primitive_buffer_size);
+    mcc_vec4f *primitive_buffer = malloc(primitive_buffer_size);
 
-    // Create one task for each 16 triangles
-    const uint32_t vertex_task_size = 3 * 16;
+    // Create one task for each 32 triangles
+    const uint32_t vertex_task_size = 3 * 32;
     const uint32_t vertex_task_count = mcc_up_div(r_config->vertex_count, vertex_task_size);
     printf("vertex_task_count: %u\n", vertex_task_count);
     struct vertex_process_task_data *tasks_data = malloc(sizeof(*tasks_data) * vertex_task_count);
     
-    struct mcc_wait_counter wait_counter;
-    mcc_wait_counter_init(&wait_counter, vertex_task_count);
+    struct mcc_wait_counter vertex_processing_wait_counter;
+    mcc_wait_counter_init(&vertex_processing_wait_counter, vertex_task_count);
 
     for (uint32_t buffer_offset = 0, task_idx = 0; task_idx < vertex_task_count; task_idx++) {
         tasks_data[task_idx] = (struct vertex_process_task_data) {
@@ -681,7 +742,7 @@ void mcc_cpurast_render(const struct mcc_cpurast_render_config *r_config) {
             .vertex_start_idx = task_idx * vertex_task_size,
             .vertex_count = vertex_task_size,
 
-            .o_wait_counter = &wait_counter,
+            .o_wait_counter = &vertex_processing_wait_counter,
 
             .r_out_primitive_buffer = primitive_buffer,
             .out_vertex_count = ~0u,
@@ -710,8 +771,8 @@ void mcc_cpurast_render(const struct mcc_cpurast_render_config *r_config) {
     }
     mcc_thread_pool_unlock(pool);
 
-    mcc_wait_counter_wait(&wait_counter);
-    mcc_wait_counter_free(&wait_counter);
+    mcc_wait_counter_wait(&vertex_processing_wait_counter);
+    mcc_wait_counter_free(&vertex_processing_wait_counter);
 
     uint32_t vertex_index_increment;
     switch (r_config->vertex_processing) {
